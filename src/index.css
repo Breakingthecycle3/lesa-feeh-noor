@@ -1,0 +1,54 @@
+@import "tailwindcss";
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+}
+
+.font-heading {
+  font-family: 'Alexandria', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.font-body {
+  font-family: 'Tajawal', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* Editorial line clamp and reading styles */
+.editorial-prose p {
+  margin-bottom: 1.5rem;
+  line-height: 1.85;
+  font-size: 1.125rem;
+}
+
+.editorial-prose h2 {
+  font-family: 'Alexandria', sans-serif;
+  font-weight: 700;
+  margin-top: 2.25rem;
+  margin-bottom: 1rem;
+  font-size: 1.5rem;
+  color: #1c1917;
+}
+
+.editorial-prose h3 {
+  font-family: 'Alexandria', sans-serif;
+  font-weight: 600;
+  margin-top: 1.75rem;
+  margin-bottom: 0.75rem;
+  font-size: 1.25rem;
+  color: #292524;
+}
+
+.editorial-prose blockquote {
+  border-right: 4px solid #36533d;
+  padding-right: 1.25rem;
+  padding-left: 0.5rem;
+  margin: 1.75rem 0;
+  font-style: italic;
+  color: #44403c;
+  background-color: rgba(54, 83, 61, 0.04);
+  border-radius: 0.5rem 0 0 0.5rem;
+  padding-top: 0.75rem;
+  padding-bottom: 0.75rem;
+}

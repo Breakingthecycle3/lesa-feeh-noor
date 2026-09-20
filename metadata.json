@@ -1,0 +1,6 @@
+{
+  "name": "لسه في نور",
+  "description": "منصة عربية رائدة للدعم النفسي والوعي بالعلاقات والتعافي تحت شعار: مهما كان اللي عديت بيه... لسه في نور.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
