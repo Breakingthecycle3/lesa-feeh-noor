@@ -2,8 +2,10 @@ import React, { useState } from 'react';
 import { Sparkles, Mail, Send, Heart, ArrowUp } from 'lucide-react';
 import { api } from '../lib/api';
 import { useToast } from '../context/ToastContext';
+import { useAuth } from '../context/AuthContext';
 
 export function Footer({ onNavigate }: { onNavigate: (path: string) => void }) {
+  const { isAdmin, isEditor } = useAuth();
   const [email, setEmail] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const { showToast } = useToast();
@@ -81,11 +83,13 @@ export function Footer({ onNavigate }: { onNavigate: (path: string) => void }) {
                   احكي لنا (مساحة فضفضة سرية)
                 </button>
               </li>
-              <li>
-                <button onClick={() => onNavigate('/admin')} className="text-[#36533D] font-bold hover:underline transition-colors cursor-pointer flex items-center gap-1">
-                  <span>لوحة التحكم والإدارة</span>
-                </button>
-              </li>
+              {(isAdmin || isEditor) && (
+                <li>
+                  <button onClick={() => onNavigate('/admin')} className="text-[#36533D] font-bold hover:underline transition-colors cursor-pointer flex items-center gap-1">
+                    <span>لوحة التحكم والإدارة</span>
+                  </button>
+                </li>
+              )}
             </ul>
           </div>
 
@@ -161,9 +165,11 @@ export function Footer({ onNavigate }: { onNavigate: (path: string) => void }) {
             <button onClick={() => onNavigate('/tell-us')} className="hover:text-stone-900 transition-colors cursor-pointer">
               ميثاق السرية
             </button>
-            <button onClick={() => onNavigate('/admin')} className="text-[#36533D] font-bold hover:underline transition-colors cursor-pointer">
-              لوحة التحكم
-            </button>
+            {(isAdmin || isEditor) && (
+              <button onClick={() => onNavigate('/admin')} className="text-[#36533D] font-bold hover:underline transition-colors cursor-pointer">
+                لوحة التحكم
+              </button>
+            )}
             <button
               onClick={scrollToTop}
               className="p-2 rounded-xl bg-white border border-[#E7E2D8] text-stone-600 hover:text-stone-900 hover:bg-stone-50 transition-colors cursor-pointer flex items-center gap-1"

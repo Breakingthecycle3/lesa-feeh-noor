@@ -4,6 +4,7 @@ import { Journey } from '../types';
 import { api } from '../lib/api';
 import { JourneyCard } from '../components/Cards';
 import { Breadcrumbs, LoadingState, SEOHead } from '../components/Common';
+import { MindfulnessTimer } from '../components/MindfulnessTimer';
 
 export function JourneysPage({ onNavigate }: { onNavigate: (path: string) => void }) {
   const [journeys, setJourneys] = useState<Journey[]>([]);
@@ -43,6 +44,44 @@ export function JourneysPage({ onNavigate }: { onNavigate: (path: string) => voi
         <p className="font-body text-sm sm:text-base text-stone-600 leading-relaxed">
           لأن التعافي ليس خطوة واحدة بل مسار مستمر، صممنا لكِ هذه الرحلات لتنتقلي فيها بين المحطات خطوة بخطوة بكل لطف ودون استعجال.
         </p>
+      </div>
+
+      {/* Mindfulness Tool Section */}
+      <div className="mb-16">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+          <div className="lg:col-span-4">
+            <MindfulnessTimer />
+          </div>
+          <div className="lg:col-span-8 bg-[#36533D]/5 rounded-3xl p-6 sm:p-8 border border-[#36533D]/10">
+            <h2 className="font-heading font-bold text-xl text-[#36533D] mb-4 flex items-center gap-2">
+              <Sparkles className="w-5 h-5" />
+              كيف تبدأين رحلتكِ؟
+            </h2>
+            <div className="space-y-4">
+              <div className="flex gap-4">
+                <div className="w-8 h-8 rounded-full bg-[#36533D] text-white flex items-center justify-center shrink-0 font-bold text-sm">١</div>
+                <div>
+                  <h3 className="font-bold text-stone-900 text-sm mb-1">هدئي عقلكِ أولاً</h3>
+                  <p className="text-stone-600 text-xs sm:text-sm leading-relaxed">استخدمي مؤقت التأمل بالأعلى لمدة ٣ دقائق لتصفية ذهنكِ قبل اختيار المسار المناسب لكِ.</p>
+                </div>
+              </div>
+              <div className="flex gap-4">
+                <div className="w-8 h-8 rounded-full bg-[#36533D] text-white flex items-center justify-center shrink-0 font-bold text-sm">٢</div>
+                <div>
+                  <h3 className="font-bold text-stone-900 text-sm mb-1">اختاري الرحلة الأقرب لحالكِ</h3>
+                  <p className="text-stone-600 text-xs sm:text-sm leading-relaxed">كل مسار مصمم بعناية ليناسب مرحلة معينة من الألم أو البحث عن الذات.</p>
+                </div>
+              </div>
+              <div className="flex gap-4">
+                <div className="w-8 h-8 rounded-full bg-[#36533D] text-white flex items-center justify-center shrink-0 font-bold text-sm">٣</div>
+                <div>
+                  <h3 className="font-bold text-stone-900 text-sm mb-1">التزمي بخطوة واحدة يومياً</h3>
+                  <p className="text-stone-600 text-xs sm:text-sm leading-relaxed">لا تستعجلي النتائج، فالنور يظهر تدريجياً مع كل خطوة وعي جديدة.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Grid */}

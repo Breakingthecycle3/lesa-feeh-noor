@@ -242,13 +242,15 @@ export function Header({
                         </span>
                       </div>
 
-                      <button
-                        onClick={() => handleNav('/admin')}
-                        className="w-full px-4 py-2.5 text-xs font-bold text-[#36533D] hover:bg-[#36533D]/10 flex items-center gap-2.5 transition-colors cursor-pointer"
-                      >
-                        <Shield className="w-4 h-4 text-amber-500" />
-                        <span>لوحة التحكم والإدارة العامة</span>
-                      </button>
+                      {(isAdmin || isEditor) && (
+                        <button
+                          onClick={() => handleNav('/admin')}
+                          className="w-full px-4 py-2.5 text-xs font-bold text-[#36533D] hover:bg-[#36533D]/10 flex items-center gap-2.5 transition-colors cursor-pointer"
+                        >
+                          <Shield className="w-4 h-4 text-amber-500" />
+                          <span>لوحة التحكم والإدارة العامة</span>
+                        </button>
+                      )}
 
                       <button
                         onClick={() => handleNav('/bookmarks')}

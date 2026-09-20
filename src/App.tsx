@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AuthProvider } from './context/AuthContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 import { Header } from './components/Header';
 import { Footer } from './components/Footer';
@@ -31,6 +31,7 @@ import { InspiringQuoteModal } from './components/InspiringQuoteModal';
 import { FloatingChatWidget } from './components/FloatingChatWidget';
 
 function AppContent() {
+  const { isAdmin, isEditor } = useAuth();
   const [currentPath, setCurrentPath] = useState<string>(() => {
     return (window.location.pathname || '/') + (window.location.search || '');
   });
@@ -64,7 +65,20 @@ function AppContent() {
 
     // 2. Admin
     if (currentPath.startsWith('/admin')) {
-      return <AdminDashboard onNavigate={navigate} />;
+      if (isAdmin || isEditor) {
+        return <AdminDashboard onNavigate={navigate} />;
+      }
+      // Fallback for non-admin attempting to access /admin directly
+      return (
+        <div className="max-w-2xl mx-auto py-20 px-4 text-center">
+          <EmptyState
+            title="غير مسموح بالدخول"
+            description="عذراً، هذه الصفحة مخصصة لمديري ومحرري المنصة فقط."
+            actionLabel="العودة للصفحة الرئيسية"
+            onAction={() => navigate('/')}
+          />
+        </div>
+      );
     }
 
     // 3. Articles (supports /articles and /articles?mood=... or ?category=...)
