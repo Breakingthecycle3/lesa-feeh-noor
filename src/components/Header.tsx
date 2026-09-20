@@ -406,6 +406,22 @@ export function Header({
                 <Search className="w-4 h-4" />
                 <span>البحث في المنصة</span>
               </button>
+
+              {isLoggedIn && (
+                <div className="border-t border-stone-200 mt-4 pt-4">
+                  <button
+                    onClick={() => {
+                      setMobileMenuOpen(false);
+                      logout();
+                      onNavigate('/');
+                    }}
+                    className="w-full text-right px-4 py-3 rounded-xl text-sm font-bold text-rose-600 bg-rose-50 border border-rose-100 flex items-center gap-2 cursor-pointer"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    <span>تسجيل الخروج</span>
+                  </button>
+                </div>
+              )}
             </div>
           </motion.div>
         )}

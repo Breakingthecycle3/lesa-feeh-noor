@@ -92,11 +92,55 @@ function initSchema(db: Database) {
       email TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
       name TEXT NOT NULL,
-      role TEXT NOT NULL DEFAULT 'USER', -- 'ADMIN', 'EDITOR', 'USER'
+      role TEXT NOT NULL DEFAULT 'USER', -- 'SUPER_ADMIN', 'ADMIN', 'EDITOR', 'USER'
+      role_id INTEGER REFERENCES roles(id),
       avatar TEXT,
       bio TEXT,
+      status TEXT NOT NULL DEFAULT 'active', -- 'active', 'suspended'
+      last_login DATETIME,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS roles (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT UNIQUE NOT NULL,
+      description TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS permissions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT UNIQUE NOT NULL, -- e.g. 'users.view'
+      description TEXT,
+      module TEXT, -- e.g. 'users', 'content', 'settings'
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS role_permissions (
+      role_id INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+      permission_id INTEGER NOT NULL REFERENCES permissions(id) ON DELETE CASCADE,
+      PRIMARY KEY (role_id, permission_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      user_name TEXT,
+      action TEXT NOT NULL, -- 'login', 'logout', 'create', 'update', 'delete'
+      resource_type TEXT NOT NULL, -- 'user', 'article', 'role', etc.
+      resource_id TEXT,
+      details TEXT, -- JSON string
+      status TEXT DEFAULT 'success', -- 'success', 'failure'
+      ip_address TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS user_sessions (
+      id TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      expires_at DATETIME NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS categories (
@@ -330,17 +374,77 @@ async function seedInitialData(db: Database) {
 
   console.log('🌱 Seeding initial database records for لسه في نور...');
 
+  // 0. Permissions
+  const permissions = [
+    // Users module
+    { name: 'users.view', module: 'users', desc: 'مشاهدة قائمة الأعضاء' },
+    { name: 'users.create', module: 'users', desc: 'إضافة عضو جديد' },
+    { name: 'users.edit', module: 'users', desc: 'تعديل بيانات الأعضاء' },
+    { name: 'users.delete', module: 'users', desc: 'حذف الأعضاء نهائياً' },
+    { name: 'users.suspend', module: 'users', desc: 'إيقاف/تنشيط الحسابات' },
+    
+    // Admins module
+    { name: 'admins.view', module: 'admins', desc: 'مشاهدة قائمة المديرين' },
+    { name: 'admins.create', module: 'admins', desc: 'إضافة مدير جديد' },
+    { name: 'admins.edit', module: 'admins', desc: 'تعديل صلاحيات المديرين' },
+    { name: 'admins.delete', module: 'admins', desc: 'حذف مدير' },
+
+    // Content module
+    { name: 'content.view', module: 'content', desc: 'مشاهدة المحتوى' },
+    { name: 'content.create', module: 'content', desc: 'إضافة محتوى جديد' },
+    { name: 'content.edit', module: 'content', desc: 'تعديل المحتوى' },
+    { name: 'content.delete', module: 'content', desc: 'حذف المحتوى' },
+    { name: 'content.publish', module: 'content', desc: 'نشر/إلغاء نشر المحتوى' },
+
+    // Settings module
+    { name: 'settings.view', module: 'settings', desc: 'مشاهدة إعدادات الموقع' },
+    { name: 'settings.edit', module: 'settings', desc: 'تعديل إعدادات الموقع' },
+
+    // Security module
+    { name: 'security.view', module: 'security', desc: 'مشاهدة تقارير الأمان' },
+    { name: 'security.manage', module: 'security', desc: 'إدارة الجلسات والأمان' },
+    { name: 'audit_logs.view', module: 'audit_logs', desc: 'مشاهدة سجل العمليات' },
+  ];
+
+  for (const p of permissions) {
+    db.run('INSERT OR IGNORE INTO permissions (name, module, description) VALUES (?, ?, ?)', [p.name, p.module, p.desc]);
+  }
+
+  // 0.1 Roles
+  db.run("INSERT OR IGNORE INTO roles (id, name, description) VALUES (1, 'Super Admin', 'كامل الصلاحيات على النظام')");
+  db.run("INSERT OR IGNORE INTO roles (id, name, description) VALUES (2, 'Admin', 'إدارة الأعضاء والمحتوى')");
+  db.run("INSERT OR IGNORE INTO roles (id, name, description) VALUES (3, 'Editor', 'إدارة المحتوى فقط')");
+
+  // 0.2 Associate Permissions with Roles
+  // Super Admin gets everything
+  db.run(`
+    INSERT OR IGNORE INTO role_permissions (role_id, permission_id)
+    SELECT 1, id FROM permissions
+  `);
+
+  // Admin gets most things except security/audit_logs maybe? or everything except deleting Super Admins
+  db.run(`
+    INSERT OR IGNORE INTO role_permissions (role_id, permission_id)
+    SELECT 2, id FROM permissions WHERE module NOT IN ('security', 'audit_logs')
+  `);
+
+  // Editor gets only content
+  db.run(`
+    INSERT OR IGNORE INTO role_permissions (role_id, permission_id)
+    SELECT 3, id FROM permissions WHERE module = 'content'
+  `);
+
   const passwordHash = await bcrypt.hash('admin123456', 10);
   const editorHash = await bcrypt.hash('editor123456', 10);
   const userHash = await bcrypt.hash('user123456', 10);
 
   // 1. Users
   db.run(`
-    INSERT INTO users (id, email, password_hash, name, role, avatar, bio)
+    INSERT INTO users (id, email, password_hash, name, role, role_id, avatar, bio)
     VALUES 
-    (1, 'admin@lesanour.com', '${passwordHash}', 'د. نور الهدى الشريف', 'ADMIN', 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=400&q=80', 'استشارية نفسية ومؤسسة منصة لسه في نور. نؤمن بأن كل ألم يحمل في طياته بذرة وعي جديد.'),
-    (2, 'editor@lesanour.com', '${editorHash}', 'أحمد كمال', 'EDITOR', 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=400&q=80', 'محرر ومسؤول المحتوى الإنساني والتطوير الذاتي.'),
-    (3, 'user@lesanour.com', '${userHash}', 'سارة المنصوري', 'USER', 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80', 'باحثة عن السلام الداخلي ومتابعة للمنصة.');
+    (1, 'admin@lesanour.com', '${passwordHash}', 'د. نور الهدى الشريف', 'SUPER_ADMIN', 1, 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=400&q=80', 'استشارية نفسية ومؤسسة منصة لسه في نور. نؤمن بأن كل ألم يحمل في طياته بذرة وعي جديد.'),
+    (2, 'editor@lesanour.com', '${editorHash}', 'أحمد كمال', 'EDITOR', 3, 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=400&q=80', 'محرر ومسؤول المحتوى الإنساني والتطوير الذاتي.'),
+    (3, 'user@lesanour.com', '${userHash}', 'سارة المنصوري', 'USER', NULL, 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80', 'باحثة عن السلام الداخلي ومتابعة للمنصة.');
   `);
 
   // 2. Initial Categories (12 requested categories)
@@ -975,8 +1079,8 @@ async function ensureFatmaAdmin(db: Database) {
 
     if (!res.length || !res[0].values.length) {
       db.run(`
-        INSERT INTO users (email, password_hash, name, role, avatar, bio)
-        VALUES (?, ?, ?, 'ADMIN', ?, ?)
+        INSERT INTO users (email, password_hash, name, role, role_id, avatar, bio)
+        VALUES (?, ?, ?, 'SUPER_ADMIN', 1, ?, ?)
       `, [
         fatmaEmail,
         passwordHash,
@@ -984,10 +1088,10 @@ async function ensureFatmaAdmin(db: Database) {
         'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=400&q=80',
         'المدير العام والمشرفة العليا على منصة لسه في نور - كامل الصلاحيات الإدارية مفعلة.'
       ]);
-      console.log(`🛡️ Admin account created for Fatma Mohamed: ${fatmaEmail}`);
+      console.log(`🛡️ Super Admin account created for Fatma Mohamed: ${fatmaEmail}`);
     } else {
-      db.run(`UPDATE users SET role = 'ADMIN', name = 'فاطمة محمد (المدير العام)' WHERE LOWER(email) = ?`, [fatmaEmail]);
-      console.log(`🛡️ Verified full ADMIN permissions for Fatma Mohamed: ${fatmaEmail}`);
+      db.run(`UPDATE users SET role = 'SUPER_ADMIN', role_id = 1, name = 'فاطمة محمد (المدير العام)' WHERE LOWER(email) = ?`, [fatmaEmail]);
+      console.log(`🛡️ Verified full SUPER_ADMIN permissions for Fatma Mohamed: ${fatmaEmail}`);
     }
   } catch (err) {
     console.error('Error ensuring Fatma admin in database:', err);

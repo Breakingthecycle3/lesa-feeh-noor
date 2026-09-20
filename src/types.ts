@@ -2,10 +2,41 @@ export interface User {
   id: number;
   email: string;
   name: string;
-  role: 'ADMIN' | 'EDITOR' | 'USER';
+  role: 'SUPER_ADMIN' | 'ADMIN' | 'EDITOR' | 'USER';
+  role_id?: number;
+  permissions?: string[];
   avatar?: string;
   bio?: string;
+  status?: 'active' | 'suspended';
+  last_login?: string;
   created_at?: string;
+}
+
+export interface Permission {
+  id: number;
+  name: string;
+  description: string;
+  module: string;
+}
+
+export interface Role {
+  id: number;
+  name: string;
+  description: string;
+  permissions: string[];
+}
+
+export interface AuditLog {
+  id: number;
+  user_id: number | null;
+  user_name: string;
+  action: string;
+  resource_type: string;
+  resource_id: string | null;
+  details: string | null;
+  status: 'success' | 'failure';
+  ip_address: string | null;
+  created_at: string;
 }
 
 export interface Category {

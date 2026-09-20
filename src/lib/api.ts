@@ -42,12 +42,6 @@ async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
 
 export const api = {
   // Auth
-  quickAdminLogin: (email: string = 'fatmamohamed36699@gmail.com') =>
-    request<{ token: string; user: User }>('/api/auth/quick-admin-login', {
-      method: 'POST',
-      body: JSON.stringify({ email })
-    }),
-
   login: (credentials: { email: string; password: string }) =>
     request<{ token: string; user: User }>('/api/auth/login', {
       method: 'POST',
@@ -61,6 +55,8 @@ export const api = {
     }),
 
   getMe: () => request<{ user: User }>('/api/auth/me'),
+
+  logout: () => request<{ success: boolean }>('/api/auth/logout', { method: 'POST' }),
 
   updateProfile: (data: { name?: string; bio?: string; avatar?: string; password?: string }) =>
     request<{ user: User }>('/api/auth/profile', {
@@ -407,6 +403,13 @@ export const api = {
     // Newsletter
     getNewsletterSubscribers: () =>
       request<{ subscribers: any[] }>('/api/admin/newsletter'),
+
+    // Audit Logs
+    getAuditLogs: () => request<{ logs: any[] }>('/api/admin/audit-logs'),
+
+    // Roles & Permissions
+    getRoles: () => request<{ roles: any[] }>('/api/admin/roles'),
+    getPermissions: () => request<{ permissions: any[] }>('/api/admin/permissions'),
 
     // Users
     getUsers: () => request<{ users: User[] }>('/api/admin/users'),

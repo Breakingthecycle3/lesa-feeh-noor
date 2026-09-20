@@ -7,6 +7,8 @@ import {
   requireAuth,
   requireEditor,
   requireAdmin,
+  requirePermission,
+  logAudit,
   signToken
 } from './auth';
 import { generateSpeechFromText } from './tts';
@@ -17,66 +19,6 @@ export const apiRouter = Router();
 // ==========================================
 // 1. AUTHENTICATION & PROFILE
 // ==========================================
-
-apiRouter.post('/auth/quick-admin-login', async (req: Request, res: Response) => {
-  const targetEmail = (req.body?.email || 'fatmamohamed36699@gmail.com').trim().toLowerCase();
-
-  let user = queryOne<{
-    id: number;
-    email: string;
-    name: string;
-    role: 'ADMIN' | 'EDITOR' | 'USER';
-    avatar?: string;
-    bio?: string;
-  }>('SELECT id, email, name, role, avatar, bio FROM users WHERE LOWER(email) = ?', [targetEmail]);
-
-  if (!user) {
-    const passwordHash = await bcrypt.hash('admin123456', 10);
-    const result = execute(`
-      INSERT INTO users (email, password_hash, name, role, avatar, bio)
-      VALUES (?, ?, ?, 'ADMIN', ?, ?)
-    `, [
-      targetEmail,
-      passwordHash,
-      targetEmail === 'fatmamohamed36699@gmail.com' ? 'فاطمة محمد (المدير العام)' : 'مدير النظام',
-      'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=400&q=80',
-      'المدير العام والمشرفة العليا على منصة لسه في نور - كامل الصلاحيات الإدارية مفعلة.'
-    ]);
-    user = {
-      id: result.lastInsertRowid,
-      email: targetEmail,
-      name: targetEmail === 'fatmamohamed36699@gmail.com' ? 'فاطمة محمد (المدير العام)' : 'مدير النظام',
-      role: 'ADMIN',
-      avatar: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&w=400&q=80',
-      bio: 'المدير العام والمشرفة العليا على منصة لسه في نور - كامل الصلاحيات الإدارية مفعلة.'
-    };
-  } else {
-    execute('UPDATE users SET role = "ADMIN", name = "فاطمة محمد (المدير العام)" WHERE id = ?', [user.id]);
-    user.role = 'ADMIN';
-    user.name = 'فاطمة محمد (المدير العام)';
-  }
-
-  const token = signToken({
-    id: user.id,
-    email: user.email,
-    name: user.name,
-    role: 'ADMIN',
-    avatar: user.avatar,
-    bio: user.bio
-  });
-
-  res.json({
-    token,
-    user: {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      role: 'ADMIN',
-      avatar: user.avatar,
-      bio: user.bio
-    }
-  });
-});
 
 apiRouter.post('/auth/login', async (req: Request, res: Response) => {
   const { email, password } = req.body;
@@ -90,27 +32,35 @@ apiRouter.post('/auth/login', async (req: Request, res: Response) => {
     email: string;
     password_hash: string;
     name: string;
-    role: 'ADMIN' | 'EDITOR' | 'USER';
+    role: 'SUPER_ADMIN' | 'ADMIN' | 'EDITOR' | 'USER';
+    role_id?: number;
     avatar?: string;
     bio?: string;
+    status: string;
   }>('SELECT * FROM users WHERE LOWER(email) = ?', [normalizedEmail]);
 
   if (!user) {
     return res.status(401).json({ error: 'البريد الإلكتروني أو كلمة المرور غير صحيحة' });
   }
 
-  const isMatch = (password === 'admin123456' && normalizedEmail === 'fatmamohamed36699@gmail.com') || (await bcrypt.compare(password, user.password_hash));
-  if (!isMatch) {
+  if (user.status === 'suspended') {
+    return res.status(403).json({ error: 'تم إيقاف هذا الحساب مؤقتاً، يرجى التواصل مع الإدارة' });
+  }
+
+  const valid = await bcrypt.compare(password, user.password_hash);
+  if (!valid) {
     return res.status(401).json({ error: 'البريد الإلكتروني أو كلمة المرور غير صحيحة' });
   }
 
-  const effectiveRole = normalizedEmail === 'fatmamohamed36699@gmail.com' ? 'ADMIN' : user.role;
+  // Update last login
+  execute('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?', [user.id]);
 
   const token = signToken({
     id: user.id,
     email: user.email,
     name: user.name,
-    role: effectiveRole,
+    role: user.role,
+    role_id: user.role_id,
     avatar: user.avatar,
     bio: user.bio
   });
@@ -121,7 +71,8 @@ apiRouter.post('/auth/login', async (req: Request, res: Response) => {
       id: user.id,
       email: user.email,
       name: user.name,
-      role: effectiveRole,
+      role: user.role,
+      role_id: user.role_id,
       avatar: user.avatar,
       bio: user.bio
     }
@@ -144,7 +95,7 @@ apiRouter.post('/auth/register', async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'البريد الإلكتروني مسجل بالفعل' });
   }
 
-  const assignedRole = normalizedEmail === 'fatmamohamed36699@gmail.com' ? 'ADMIN' : 'USER';
+  const assignedRole = normalizedEmail === 'fatmamohamed36699@gmail.com' ? 'SUPER_ADMIN' : 'USER';
   const passwordHash = await bcrypt.hash(password, 10);
   const result = execute(
     'INSERT INTO users (name, email, password_hash, role, avatar) VALUES (?, ?, ?, ?, ?)',
@@ -170,7 +121,13 @@ apiRouter.post('/auth/register', async (req: Request, res: Response) => {
 });
 
 apiRouter.get('/auth/me', requireAuth, (req: AuthenticatedRequest, res: Response) => {
-  res.json({ user: req.user });
+  const { user } = req;
+  res.json({
+    user: {
+      ...user,
+      permissions: user?.permissions || []
+    }
+  });
 });
 
 apiRouter.put('/auth/profile', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
@@ -195,6 +152,11 @@ apiRouter.put('/auth/profile', requireAuth, async (req: AuthenticatedRequest, re
     [userId]
   );
   res.json({ user: updated });
+});
+
+apiRouter.post('/auth/logout', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+  logAudit(req.user, 'logout', 'user', req.user?.id.toString(), { message: 'User logged out' });
+  res.json({ success: true });
 });
 
 // ==========================================
@@ -1102,7 +1064,7 @@ apiRouter.post('/newsletter/subscribe', (req: Request, res: Response) => {
 // 15. ADMIN DASHBOARD & CRUD MANAGEMENT
 // ==========================================
 
-apiRouter.get('/admin/stats', requireEditor, (_req: AuthenticatedRequest, res: Response) => {
+apiRouter.get('/admin/stats', requirePermission('content.view'), (_req: AuthenticatedRequest, res: Response) => {
   const totalArticles = queryOne<{ count: number }>('SELECT COUNT(*) as count FROM articles')?.count || 0;
   const publishedArticles = queryOne<{ count: number }>('SELECT COUNT(*) as count FROM articles WHERE status = "published"')?.count || 0;
   const draftArticles = queryOne<{ count: number }>('SELECT COUNT(*) as count FROM articles WHERE status = "draft"')?.count || 0;
@@ -1137,7 +1099,7 @@ apiRouter.get('/admin/stats', requireEditor, (_req: AuthenticatedRequest, res: R
 });
 
 // --- ADMIN: ARTICLES CRUD ---
-apiRouter.get('/admin/articles', requireEditor, (req: Request, res: Response) => {
+apiRouter.get('/admin/articles', requirePermission('content.view'), (req: Request, res: Response) => {
   const { search, status, category } = req.query;
   let whereClauses: string[] = [];
   const params: any[] = [];
@@ -1550,13 +1512,32 @@ apiRouter.get('/admin/newsletter', requireEditor, (_req: Request, res: Response)
 });
 
 // --- ADMIN: USER MANAGEMENT (ADMIN ROLE ONLY) ---
-apiRouter.get('/admin/users', requireAdmin, (_req: AuthenticatedRequest, res: Response) => {
-  const users = queryAll('SELECT id, name, email, role, avatar, bio, created_at FROM users ORDER BY created_at DESC');
+apiRouter.get('/admin/users', requirePermission('users.view'), (_req: AuthenticatedRequest, res: Response) => {
+  const users = queryAll('SELECT id, name, email, role, role_id, avatar, bio, status, last_login, created_at FROM users ORDER BY created_at DESC');
   res.json({ users });
 });
 
-apiRouter.post('/admin/users', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
-  const { name, email, password, role, bio } = req.body;
+apiRouter.get('/admin/audit-logs', requirePermission('audit_logs.view'), (_req: AuthenticatedRequest, res: Response) => {
+  const logs = queryAll('SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 500');
+  res.json({ logs });
+});
+
+apiRouter.get('/admin/roles', requirePermission('admins.view'), (_req: AuthenticatedRequest, res: Response) => {
+  const roles = queryAll('SELECT * FROM roles');
+  for (const role of roles) {
+    const perms = queryAll<{ name: string }>('SELECT p.name FROM permissions p JOIN role_permissions rp ON p.id = rp.permission_id WHERE rp.role_id = ?', [role.id]);
+    (role as any).permissions = perms.map(p => p.name);
+  }
+  res.json({ roles });
+});
+
+apiRouter.get('/admin/permissions', requirePermission('admins.view'), (_req: AuthenticatedRequest, res: Response) => {
+  const permissions = queryAll('SELECT * FROM permissions');
+  res.json({ permissions });
+});
+
+apiRouter.post('/admin/users', requirePermission('users.create'), async (req: AuthenticatedRequest, res: Response) => {
+  const { name, email, password, role, role_id, bio } = req.body;
   if (!name || !email || !password) {
     return res.status(400).json({ error: 'الاسم، البريد الإلكتروني، وكلمة المرور مطلوبة' });
   }
@@ -1568,22 +1549,32 @@ apiRouter.post('/admin/users', requireAdmin, async (req: AuthenticatedRequest, r
 
   const hash = await bcrypt.hash(password, 10);
   const result = execute(
-    'INSERT INTO users (name, email, password_hash, role, bio, avatar) VALUES (?, ?, ?, ?, ?, ?)',
+    'INSERT INTO users (name, email, password_hash, role, role_id, bio, avatar) VALUES (?, ?, ?, ?, ?, ?, ?)',
     [
       name.trim(),
       email.trim().toLowerCase(),
       hash,
       role || 'EDITOR',
+      role_id || null,
       bio || '',
       `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}`
     ]
   );
+  logAudit(req.user, 'create', 'user', result.lastInsertRowid.toString(), { name, email, role });
   res.status(201).json({ success: true, id: result.lastInsertRowid });
 });
 
-apiRouter.put('/admin/users/:id', requireAdmin, async (req: AuthenticatedRequest, res: Response) => {
+apiRouter.put('/admin/users/:id', requirePermission('users.edit'), async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
-  const { name, email, role, bio, password } = req.body;
+  const { name, email, role, role_id, bio, password, status } = req.body;
+
+  const targetUser = queryOne<{ role: string }>('SELECT role FROM users WHERE id = ?', [id]);
+  if (!targetUser) return res.status(404).json({ error: 'المستخدم غير موجود' });
+
+  // Security: Only SUPER_ADMIN can edit another SUPER_ADMIN
+  if (targetUser.role === 'SUPER_ADMIN' && req.user?.role !== 'SUPER_ADMIN') {
+    return res.status(403).json({ error: 'لا يمكن تعديل بيانات المدير العام الأعلى' });
+  }
 
   if (password) {
     const hash = await bcrypt.hash(password, 10);
@@ -1591,18 +1582,36 @@ apiRouter.put('/admin/users/:id', requireAdmin, async (req: AuthenticatedRequest
   }
 
   execute(
-    'UPDATE users SET name = COALESCE(?, name), email = COALESCE(?, email), role = COALESCE(?, role), bio = COALESCE(?, bio), updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-    [name || null, email ? email.trim().toLowerCase() : null, role || null, bio !== undefined ? bio : null, id]
+    'UPDATE users SET name = COALESCE(?, name), email = COALESCE(?, email), role = COALESCE(?, role), role_id = COALESCE(?, role_id), bio = COALESCE(?, bio), status = COALESCE(?, status), updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+    [
+      name || null, 
+      email ? email.trim().toLowerCase() : null, 
+      role || null, 
+      role_id || null,
+      bio !== undefined ? bio : null, 
+      status || null,
+      id
+    ]
   );
+  logAudit(req.user, 'update', 'user', id, { name, role, status });
   res.json({ success: true });
 });
 
-apiRouter.delete('/admin/users/:id', requireAdmin, (req: AuthenticatedRequest, res: Response) => {
+apiRouter.delete('/admin/users/:id', requirePermission('users.delete'), (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
+  const targetUser = queryOne<{ role: string }>('SELECT role FROM users WHERE id = ?', [id]);
+  
+  if (!targetUser) return res.status(404).json({ error: 'المستخدم غير موجود' });
+  
+  if (targetUser.role === 'SUPER_ADMIN') {
+    return res.status(403).json({ error: 'لا يمكن حذف حساب المدير العام الأعلى' });
+  }
+
   if (parseInt(id) === req.user!.id) {
     return res.status(400).json({ error: 'لا يمكنك حذف حسابك الحالي' });
   }
   execute('DELETE FROM users WHERE id = ?', [id]);
+  logAudit(req.user, 'delete', 'user', id);
   res.json({ success: true });
 });
 

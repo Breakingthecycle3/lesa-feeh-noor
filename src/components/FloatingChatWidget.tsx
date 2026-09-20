@@ -45,11 +45,6 @@ export function FloatingChatWidget({
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
-  // Do not show widget on full /chat page or /admin page
-  if (currentPath === '/chat' || currentPath.startsWith('/admin')) {
-    return null;
-  }
-
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -59,6 +54,11 @@ export function FloatingChatWidget({
       scrollToBottom();
     }
   }, [isOpen, messages.length, isLoading]);
+
+  // Do not show widget on full /chat page or /admin page
+  if (currentPath === '/chat' || currentPath.startsWith('/admin')) {
+    return null;
+  }
 
   const handleSendMessage = async (textToSend?: string) => {
     const text = (textToSend || inputMessage).trim();

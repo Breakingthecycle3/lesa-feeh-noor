@@ -11,12 +11,14 @@ import {
 
 interface AdminCommentsTabProps {
   comments: any[];
-  onUpdateStatus: (id: number, status: string) => Promise<void>;
+  onStatusUpdate: (id: number, status: string) => Promise<void>;
+  onReload?: () => Promise<void>;
 }
 
 export function AdminCommentsTab({ 
   comments, 
-  onUpdateStatus 
+  onStatusUpdate,
+  onReload
 }: AdminCommentsTabProps) {
   return (
     <div className="space-y-6">
@@ -84,7 +86,7 @@ export function AdminCommentsTab({
                       <div className="flex items-center gap-2">
                         {comment.status !== 'approved' && (
                           <button
-                            onClick={() => onUpdateStatus(comment.id, 'approved')}
+                            onClick={() => onStatusUpdate(comment.id, 'approved')}
                             className="p-1.5 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 rounded-lg transition-colors"
                             title="موافقة"
                           >
@@ -93,7 +95,7 @@ export function AdminCommentsTab({
                         )}
                         {comment.status !== 'rejected' && (
                           <button
-                            onClick={() => onUpdateStatus(comment.id, 'rejected')}
+                            onClick={() => onStatusUpdate(comment.id, 'rejected')}
                             className="p-1.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg transition-colors"
                             title="رفض"
                           >

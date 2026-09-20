@@ -75,22 +75,11 @@ import { AdminJourneysTab } from '../components/admin/AdminJourneysTab';
 import { AdminPodcastsTab } from '../components/admin/AdminPodcastsTab';
 import { AdminVideosTab } from '../components/admin/AdminVideosTab';
 import { AdminMessagesTab } from '../components/admin/AdminMessagesTab';
+import { AdminSidebar, AdminTab } from '../components/admin/AdminSidebar';
+import { AdminAuditLogs } from '../components/admin/AdminAuditLogs';
+import { AdminRolesTab } from '../components/admin/AdminRolesTab';
 
-type AdminTab =
-  | 'overview'
-  | 'site_preview'
-  | 'articles'
-  | 'videos'
-  | 'messages'
-  | 'journeys'
-  | 'podcasts'
-  | 'submissions'
-  | 'comments'
-  | 'categories'
-  | 'media'
-  | 'users'
-  | 'contact'
-  | 'settings';
+// Using AdminTab type from AdminSidebar
 
 const PRESET_ARTICLE_IMAGES = [
   { label: 'سكينة وطبيعة دافئة', url: 'https://images.unsplash.com/photo-1506126613408-eca07ce68773?auto=format&fit=crop&w=1200&q=80' },
@@ -115,11 +104,12 @@ const SUGGESTED_ARTICLE_TAGS = [
 ];
 
 export function AdminDashboard({ onNavigate }: { onNavigate: (path: string) => void }) {
-  const { user, isAdmin, isEditor, logout, login, openAuthModal, loginAsFatmaAdmin } = useAuth();
+  const { user, isAdmin, isSuperAdmin, isEditor, logout, hasPermission, openAuthModal } = useAuth();
   const { showToast } = useToast();
 
   const [activeTab, setActiveTab] = useState<AdminTab>('overview');
   const [loading, setLoading] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
   // Overview stats
   const [stats, setStats] = useState<Record<string, number>>({});
@@ -140,14 +130,21 @@ export function AdminDashboard({ onNavigate }: { onNavigate: (path: string) => v
   const [contactMessages, setContactMessages] = useState<ContactMessage[]>([]);
   const [siteSettings, setSiteSettings] = useState<SiteSettings | null>(null);
 
+  // Security & RBAC State
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [loadingAudit, setLoadingAudit] = useState(false);
+  const [roles, setRoles] = useState<any[]>([]);
+  const [permissions, setPermissions] = useState<any[]>([]);
+  const [loadingSecurity, setLoadingSecurity] = useState(false);
+
   // Users / Members Management
   const [userSearchQuery, setUserSearchQuery] = useState('');
-  const [userRoleFilter, setUserRoleFilter] = useState<'ALL' | 'ADMIN' | 'EDITOR' | 'USER'>('ALL');
+  const [userRoleFilter, setUserRoleFilter] = useState<'ALL' | 'SUPER_ADMIN' | 'ADMIN' | 'EDITOR' | 'USER'>('ALL');
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [editUserData, setEditUserData] = useState<{
     name: string;
     email: string;
-    role: 'ADMIN' | 'EDITOR' | 'USER';
+    role: 'SUPER_ADMIN' | 'ADMIN' | 'EDITOR' | 'USER';
     bio: string;
     password?: string;
   }>({
@@ -189,10 +186,11 @@ export function AdminDashboard({ onNavigate }: { onNavigate: (path: string) => v
   // User Stats
   const userStats = useMemo(() => {
     const total = usersList.length;
+    const superAdmins = usersList.filter(u => u.role === 'SUPER_ADMIN').length;
     const admins = usersList.filter(u => u.role === 'ADMIN').length;
     const editors = usersList.filter(u => u.role === 'EDITOR').length;
     const regular = usersList.filter(u => u.role === 'USER').length;
-    return { total, admins, editors, regular };
+    return { total, superAdmins, admins, editors, regular };
   }, [usersList]);
 
   // Filtered Users
@@ -215,6 +213,39 @@ export function AdminDashboard({ onNavigate }: { onNavigate: (path: string) => v
   useEffect(() => {
     loadTabData(activeTab);
   }, [activeTab]);
+
+  const loadAuditLogs = async () => {
+    setLoadingAudit(true);
+    try {
+      const res = await api.admin.getAuditLogs();
+      setAuditLogs(res.logs || []);
+    } catch (err: any) {
+      showToast('فشل تحميل سجل العمليات', 'error');
+    } finally {
+      setLoadingAudit(false);
+    }
+  };
+
+  const loadRoles = async () => {
+    setLoadingSecurity(true);
+    try {
+      const res = await api.admin.getRoles();
+      setRoles(res.roles || []);
+    } catch (err: any) {
+      showToast('فشل تحميل مصفوفة الأدوار', 'error');
+    } finally {
+      setLoadingSecurity(false);
+    }
+  };
+
+  const loadPermissions = async () => {
+    try {
+      const res = await api.admin.getPermissions();
+      setPermissions(res.permissions || []);
+    } catch (err: any) {
+      showToast('فشل تحميل مصفوفة الصلاحيات', 'error');
+    }
+  };
 
   const loadTabData = async (tab: AdminTab) => {
     setLoading(true);
@@ -272,13 +303,17 @@ export function AdminDashboard({ onNavigate }: { onNavigate: (path: string) => v
         const medRes = await api.admin.getMedia();
         setMedia(medRes.media || []);
       } else if (tab === 'users') {
-        if (isAdmin) {
+        if (hasPermission('users.view')) {
           const usrRes = await api.admin.getUsers();
           setUsersList(usrRes.users || []);
         }
       } else if (tab === 'contact') {
         const cntRes = await api.admin.getContactMessages();
         setContactMessages(cntRes.messages || []);
+      } else if (tab === 'audit_logs') {
+        await loadAuditLogs();
+      } else if (tab === 'roles') {
+        await Promise.all([loadRoles(), loadPermissions()]);
       } else if (tab === 'settings') {
         const setRes = await api.getSettings();
         setSiteSettings(setRes.settings);
@@ -376,9 +411,9 @@ export function AdminDashboard({ onNavigate }: { onNavigate: (path: string) => v
     }
   };
 
-  const handleQuickChangeRole = async (targetUser: User, newRole: 'ADMIN' | 'EDITOR' | 'USER') => {
-    if (targetUser.id === user?.id && newRole !== 'ADMIN') {
-      if (!confirm('تنبيه: أنت على وشك خفض صلاحية حسابك الحالي من مدير عام! هل ترغب بالاستمرار؟')) {
+  const handleQuickChangeRole = async (targetUser: User, newRole: 'SUPER_ADMIN' | 'ADMIN' | 'EDITOR' | 'USER') => {
+    if (targetUser.id === user?.id && newRole !== user?.role) {
+      if (!confirm('تنبيه: أنت على وشك خفض صلاحية حسابك الحالي! هل ترغب بالاستمرار؟')) {
         return;
       }
     }
@@ -387,7 +422,11 @@ export function AdminDashboard({ onNavigate }: { onNavigate: (path: string) => v
       setUsersList((prev) =>
         prev.map((u) => (u.id === targetUser.id ? { ...u, role: newRole } : u))
       );
-      const roleLabel = newRole === 'ADMIN' ? 'مدير عام (Admin)' : newRole === 'EDITOR' ? 'محرر محتوى (Editor)' : 'عضو زائر (User)';
+      const roleLabel = 
+        newRole === 'SUPER_ADMIN' ? 'مدير عام أعلى (Super Admin)' :
+        newRole === 'ADMIN' ? 'مدير عام (Admin)' : 
+        newRole === 'EDITOR' ? 'محرر محتوى (Editor)' : 
+        'عضو زائر (User)';
       showToast(`تم تعديل صلاحية "${targetUser.name}" إلى: ${roleLabel}`, 'success');
     } catch (err: any) {
       showToast(err.message || 'فشل تغيير الصلاحية', 'error');
@@ -487,443 +526,190 @@ export function AdminDashboard({ onNavigate }: { onNavigate: (path: string) => v
             هذه المنطقة مخصصة لإدارة المحتوى، نشر وتعديل الموضوعات، والتحكم في صلاحيات الأعضاء.
           </p>
 
-          <div className="space-y-3">
+          <div className="space-y-4">
             <button
-              onClick={async () => {
-                try {
-                  await loginAsFatmaAdmin();
-                } catch (err: any) {
-                  showToast('تعذر الدخول بصلاحيات الإدارة', 'error');
-                }
-              }}
-              className="w-full py-3 px-4 bg-gradient-to-r from-[#36533D] to-[#2A4230] hover:from-[#2A4230] hover:to-[#1C1917] text-white font-bold rounded-xl text-sm transition-all shadow-md flex items-center justify-between cursor-pointer"
+              onClick={() => openAuthModal('login')}
+              className="w-full py-3 px-4 bg-[#36533D] hover:bg-[#2A4230] text-white font-bold rounded-xl text-sm transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
             >
-              <div className="flex items-center gap-2">
-                <Shield className="w-4 h-4 text-amber-300" />
-                <span>دخول فوري كـ فاطمة محمد (المدير العام)</span>
-              </div>
-              <span className="bg-amber-400 text-stone-950 px-2 py-0.5 rounded text-[10px] font-black">
-                كافة الصلاحيات
-              </span>
+              <Shield className="w-4 h-4" />
+              <span>تسجيل الدخول بحساب الإدارة</span>
             </button>
 
             <button
-              onClick={async () => {
-                try {
-                  await login('editor@lesanour.com', 'editor123456');
-                  showToast('مرحباً بك، تم تفعيل صلاحيات محرر المحتوى 🌿', 'success');
-                } catch (err: any) {
-                  showToast('تعذر تسجيل الدخول التجريبي', 'error');
-                }
-              }}
-              className="w-full py-2.5 px-4 bg-stone-100 hover:bg-stone-200 text-stone-800 font-bold rounded-xl text-xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
+              onClick={() => onNavigate('/')}
+              className="w-full py-3 px-4 bg-white hover:bg-stone-50 text-stone-600 font-bold rounded-xl text-sm border border-stone-200 transition-all flex items-center justify-center gap-2 cursor-pointer"
             >
-              <Edit className="w-3.5 h-3.5 text-stone-600" />
-              <span>دخول كـ محرر محتوى (Editor)</span>
+              <span>العودة للصفحة الرئيسية</span>
             </button>
-
-            <div className="pt-3 border-t border-stone-100 flex items-center justify-between text-xs">
-              <button
-                onClick={() => openAuthModal('login')}
-                className="text-[#36533D] hover:underline font-bold"
-              >
-                تسجيل الدخول بحساب مسجل
-              </button>
-              <button
-                onClick={() => onNavigate('/')}
-                className="text-stone-500 hover:text-stone-800 transition-colors"
-              >
-                العودة للرئيسية
-              </button>
-            </div>
           </div>
         </div>
       </div>
     );
   }
 
-  const navItems: Array<{ id: AdminTab; label: string; icon: any; adminOnly?: boolean }> = [
-    { id: 'overview', label: 'لوحة المؤشرات', icon: BarChart3 },
-    { id: 'site_preview', label: 'معاينة الموقع والتعديلات الحية', icon: Eye },
-    { id: 'articles', label: 'الموضوعات والمقالات', icon: FileText },
-    { id: 'videos', label: 'مكتبة الفيديوهات', icon: VideoIcon },
-    { id: 'messages', label: 'رسائل لسه في نور', icon: Quote },
-    { id: 'journeys', label: 'رحلات التعافي', icon: Compass },
-    { id: 'podcasts', label: 'حلقات البودكاست', icon: Headphones },
-    { id: 'submissions', label: 'فضفضات "احكي لنا"', icon: MessageSquareHeart },
-    { id: 'comments', label: 'إدارة التعليقات', icon: MessageCircle },
-    { id: 'categories', label: 'التصنيفات والوسوم', icon: FolderTree },
-    { id: 'media', label: 'مكتبة الوسائط', icon: ImageIcon },
-    { id: 'contact', label: 'رسائل التواصل', icon: Mail },
-    { id: 'users', label: 'إدارة المستخدمين', icon: Users, adminOnly: true },
-    { id: 'settings', label: 'إعدادات المنصة', icon: Settings, adminOnly: true }
-  ];
 
   return (
-    <div className="min-h-screen bg-[#FAF7F2] text-stone-800 text-right pb-20" dir="rtl">
-      {/* Prominent Quick Return & Live Website Preview Banner */}
-      <div className="bg-gradient-to-r from-[#36533D] via-[#2A4230] to-stone-900 text-white px-4 sm:px-6 py-2.5 flex flex-wrap items-center justify-between gap-3 border-b border-white/10 shadow-sm sticky top-0 z-30">
-        <div className="flex items-center gap-2.5 text-xs">
-          <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-          <span className="font-bold text-white">لوحة الإدارة والتحكم</span>
-          <span className="text-emerald-100/80 hidden md:inline">
-            | لرؤية كافة التعديلات والتحديثات الحية وتصفح الموقع كما يراه الزوار:
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => onNavigate('/')}
-            id="admin-top-return-to-site"
-            className="px-4 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-stone-950 font-black text-xs flex items-center gap-2 transition-all shadow-sm cursor-pointer"
-            title="الانتقال الفوري إلى الموقع ومعاينة التعديلات"
-          >
-            <Eye className="w-4 h-4 text-stone-950" />
-            <span>العودة للموقع ومشاهدة التعديلات الحية</span>
-            <ArrowLeft className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      </div>
+    <div className="min-h-screen bg-[#FAF7F2] text-stone-800 text-right" dir="rtl">
+      {/* Sidebar */}
+      <AdminSidebar 
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        onNavigate={onNavigate}
+        isCollapsed={isSidebarCollapsed}
+        setIsCollapsed={setIsSidebarCollapsed}
+      />
 
-      {/* Top Admin Navbar */}
-      <div className="bg-[#1C1917] text-white px-6 py-4 flex items-center justify-between shadow-md">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-xl bg-[#36533D] text-white flex items-center justify-center font-bold text-xs shadow-inner">
-            <Shield className="w-4 h-4 text-amber-300" />
-          </div>
-          <div>
-            <h1 className="font-heading font-bold text-sm sm:text-base leading-none">
-              لوحة التحكم والإدارة العامة | لسه في نور
-            </h1>
-            <p className="text-[10px] text-amber-300 mt-1 font-bold">
-              أهلاً بكِ يا {user?.name} (المدير العام - كافة الصلاحيات مفعلة 🛡️✨)
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => onNavigate('/')}
-            className="px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer"
-          >
-            <span>زيارة الموقع</span>
-            <ExternalLink className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={() => {
-              logout();
-              onNavigate('/');
-            }}
-            className="p-2 text-rose-400 hover:bg-rose-950/40 rounded-xl transition-colors cursor-pointer"
-            title="تسجيل الخروج"
-          >
-            <LogOut className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
-
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-          {/* Sidebar Tabs */}
-          <div className="lg:col-span-3 bg-white border border-[#E7E2D8] rounded-2xl p-3 space-y-1 shadow-sm sticky top-24">
-            {navItems.map((item) => {
-              if (item.adminOnly && !isAdmin) return null;
-              const Icon = item.icon;
-              const isActive = activeTab === item.id;
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => setActiveTab(item.id)}
-                  className={`w-full text-right px-3.5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-3 transition-all cursor-pointer ${
-                    isActive
-                      ? 'bg-[#36533D] text-white shadow-sm'
-                      : 'text-stone-700 hover:bg-[#FAF7F2]'
-                  }`}
-                >
-                  <Icon className={`w-4 h-4 ${isActive ? 'text-amber-200' : 'text-stone-400'}`} />
-                  <span>{item.label}</span>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Main Workspace Area */}
-          <div className="lg:col-span-9 bg-white border border-[#E7E2D8] rounded-3xl p-6 sm:p-8 shadow-sm min-h-[600px]">
-            {loading ? (
+      {/* Main Content Area */}
+      <main 
+        className={`transition-all duration-300 min-h-screen ${
+          isSidebarCollapsed ? 'mr-20' : 'mr-72'
+        }`}
+      >
+        <div className="p-8 max-w-7xl mx-auto">
+          {loading ? (
+            <div className="flex items-center justify-center min-h-[60vh]">
               <LoadingState message="جارٍ تحميل بيانات القسم الإداري..." />
-            ) : (
-              <>
+            </div>
+          ) : (
+            <div className="space-y-8 pb-20">
                 {/* 1. OVERVIEW TAB */}
                 {activeTab === 'overview' && (
                   <div className="space-y-8">
                     <div>
-                      <h2 className="font-heading font-black text-xl text-stone-900 mb-1">
-                        نظرة عامة على نشاط المنصة
+                      <h2 className="text-3xl font-heading font-black text-stone-900 mb-2">
+                        مرحباً بك مجدداً يا {user?.name} 🌿
                       </h2>
-                      <p className="text-xs text-stone-500">إحصائيات مباشرة من قاعدة البيانات الحقيقية</p>
+                      <p className="text-sm text-stone-500">إليك نظرة سريعة على أداء المنصة ونشاطها الحالي</p>
                     </div>
 
                     {/* Stats Grid */}
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                      <div className="p-4 bg-[#FAF7F2] border border-[#E7E2D8] rounded-2xl">
-                        <span className="text-[11px] font-bold text-stone-500 block mb-1">إجمالي المقالات</span>
-                        <span className="font-heading font-black text-2xl text-[#36533D]">{stats.articles || 0}</span>
-                      </div>
-                      <div className="p-4 bg-[#FAF7F2] border border-[#E7E2D8] rounded-2xl">
-                        <span className="text-[11px] font-bold text-stone-500 block mb-1">الفيديوهات</span>
-                        <span className="font-heading font-black text-2xl text-stone-900">{stats.videos || 0}</span>
-                      </div>
-                      <div className="p-4 bg-[#FAF7F2] border border-[#E7E2D8] rounded-2xl">
-                        <span className="text-[11px] font-bold text-stone-500 block mb-1">رسائل النور</span>
-                        <span className="font-heading font-black text-2xl text-stone-900">{stats.messages || 0}</span>
-                      </div>
-                      <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl">
-                        <span className="text-[11px] font-bold text-emerald-800 block mb-1">فضفضات جديدة</span>
-                        <span className="font-heading font-black text-2xl text-emerald-900">{stats.pendingSubmissions || 0}</span>
-                      </div>
-                      <div className="p-4 bg-[#FAF7F2] border border-[#E7E2D8] rounded-2xl">
-                        <span className="text-[11px] font-bold text-stone-500 block mb-1">إجمالي المشاهدات</span>
-                        <span className="font-heading font-black text-2xl text-stone-900">{stats.totalViews || 0}</span>
-                      </div>
-                      <div className="p-4 bg-[#FAF7F2] border border-[#E7E2D8] rounded-2xl">
-                        <span className="text-[11px] font-bold text-stone-500 block mb-1">المشتركون بالنشرة</span>
-                        <span className="font-heading font-black text-2xl text-stone-900">{stats.subscribers || 0}</span>
-                      </div>
-                      <div className="p-4 bg-[#FAF7F2] border border-[#E7E2D8] rounded-2xl">
-                        <span className="text-[11px] font-bold text-stone-500 block mb-1">التعليقات</span>
-                        <span className="font-heading font-black text-2xl text-stone-900">{stats.comments || 0}</span>
-                      </div>
-                      <div className="p-4 bg-[#FAF7F2] border border-[#E7E2D8] rounded-2xl">
-                        <span className="text-[11px] font-bold text-stone-500 block mb-1">المستخدمون المسجلون</span>
-                        <span className="font-heading font-black text-2xl text-stone-900">{stats.users || 0}</span>
-                      </div>
-                    </div>
-
-                    {/* Quick actions */}
-                    <div className="p-5 bg-stone-50 border border-stone-200 rounded-2xl">
-                      <h3 className="font-bold text-xs text-stone-800 mb-3">إجراءات سريعة:</h3>
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          onClick={() => setActiveTab('articles')}
-                          className="px-3.5 py-2 bg-[#36533D] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-sm"
-                        >
-                          <Plus className="w-3.5 h-3.5" />
-                          <span>كتابة موضوع جديد</span>
-                        </button>
-                        <button
-                          onClick={() => setActiveTab('submissions')}
-                          className="px-3.5 py-2 bg-white border border-[#E7E2D8] hover:bg-stone-50 text-stone-800 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-                        >
-                          <MessageSquareHeart className="w-3.5 h-3.5 text-rose-500" />
-                          <span>مراجعة الفضفضات المعلقة ({stats.pendingSubmissions || 0})</span>
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Recent Submissions */}
-                    <div>
-                      <h3 className="font-heading font-bold text-sm text-stone-900 mb-3">
-                        أحدث المشاركات الواردة في "احكي لنا"
-                      </h3>
-                      <div className="space-y-3">
-                        {recentSubmissions.slice(0, 3).map((sub) => (
-                          <div key={sub.id} className="p-3.5 bg-white border border-[#E7E2D8] rounded-xl flex items-center justify-between text-xs">
-                            <p className="truncate max-w-md text-stone-700 italic">"{sub.message}"</p>
-                            <span className="text-[10px] px-2 py-0.5 rounded bg-amber-50 text-amber-800 font-bold">
-                              {sub.status}
-                            </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                      <div className="p-6 bg-white border border-stone-200 rounded-3xl shadow-sm hover:shadow-md transition-shadow">
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="w-12 h-12 rounded-2xl bg-stone-100 flex items-center justify-center text-[#36533D]">
+                            <FileText className="w-6 h-6" />
                           </div>
-                        ))}
+                          <span className="text-[10px] font-black text-stone-400 uppercase tracking-widest">المقالات</span>
+                        </div>
+                        <span className="font-heading font-black text-3xl text-stone-900">{stats.articles || 0}</span>
+                        <p className="text-[10px] text-stone-400 mt-1 font-bold">إجمالي الموضوعات المنشورة</p>
+                      </div>
+
+                      <div className="p-6 bg-white border border-stone-200 rounded-3xl shadow-sm hover:shadow-md transition-shadow">
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="w-12 h-12 rounded-2xl bg-amber-50 flex items-center justify-center text-amber-600">
+                            <MessageSquareHeart className="w-6 h-6" />
+                          </div>
+                          <span className="text-[10px] font-black text-stone-400 uppercase tracking-widest">الفضفضات</span>
+                        </div>
+                        <span className="font-heading font-black text-3xl text-amber-700">{stats.pendingSubmissions || 0}</span>
+                        <p className="text-[10px] text-amber-600 mt-1 font-bold">بانتظار مراجعة النشر</p>
+                      </div>
+
+                      <div className="p-6 bg-white border border-stone-200 rounded-3xl shadow-sm hover:shadow-md transition-shadow">
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="w-12 h-12 rounded-2xl bg-emerald-50 flex items-center justify-center text-emerald-600">
+                            <Users className="w-6 h-6" />
+                          </div>
+                          <span className="text-[10px] font-black text-stone-400 uppercase tracking-widest">المجتمع</span>
+                        </div>
+                        <span className="font-heading font-black text-3xl text-[#36533D]">{stats.users || 0}</span>
+                        <p className="text-[10px] text-[#36533D] mt-1 font-bold">عضو مسجل في المنصة</p>
+                      </div>
+
+                      <div className="p-6 bg-[#1C1917] rounded-3xl shadow-lg border border-white/5">
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="w-12 h-12 rounded-2xl bg-white/10 flex items-center justify-center text-amber-400">
+                            <Eye className="w-6 h-6" />
+                          </div>
+                          <span className="text-[10px] font-black text-stone-50 uppercase tracking-widest">المشاهدات</span>
+                        </div>
+                        <span className="font-heading font-black text-3xl text-white">{stats.totalViews || 0}</span>
+                        <p className="text-[10px] text-amber-400/60 mt-1 font-bold">إجمالي الزيارات للمحتوى</p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                      {/* Recent Content */}
+                      <div className="bg-white border border-stone-200 rounded-3xl p-6 shadow-sm">
+                        <div className="flex items-center justify-between mb-6">
+                          <h3 className="font-heading font-bold text-stone-900">آخر المقالات المنشورة</h3>
+                          <button onClick={() => setActiveTab('articles')} className="text-xs font-bold text-[#36533D] hover:underline">عرض الكل</button>
+                        </div>
+                        <div className="space-y-4">
+                          {recentArticles.slice(0, 5).map((art) => (
+                            <div key={art.id} className="flex items-center gap-4 group">
+                              <img src={art.image} alt="" className="w-12 h-12 rounded-xl object-cover border border-stone-100" />
+                              <div className="flex-1 min-w-0">
+                                <h4 className="text-sm font-bold text-stone-800 truncate group-hover:text-[#36533D] transition-colors">{art.title}</h4>
+                                <p className="text-[10px] text-stone-400 mt-0.5">{new Date(art.created_at).toLocaleDateString('ar-EG')}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Pending Actions */}
+                      <div className="space-y-6">
+                        <div className="bg-[#FAF7F2] border border-[#E7E2D8] rounded-3xl p-6 shadow-sm">
+                          <h3 className="font-heading font-bold text-stone-900 mb-4">إجراءات تتطلب اهتمامك</h3>
+                          <div className="space-y-3">
+                            <button 
+                              onClick={() => setActiveTab('submissions')}
+                              className="w-full flex items-center justify-between p-4 bg-white border border-stone-200 rounded-2xl hover:border-[#36533D] transition-all group"
+                            >
+                              <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
+                                  <MessageSquareHeart className="w-5 h-5" />
+                                </div>
+                                <div className="text-right">
+                                  <p className="text-sm font-bold text-stone-800">مراجعة الفضفضات</p>
+                                  <p className="text-[10px] text-stone-500">لديك {stats.pendingSubmissions || 0} مشاركة بانتظار الموافقة</p>
+                                </div>
+                              </div>
+                              <Plus className="w-4 h-4 text-stone-300 group-hover:text-[#36533D] transition-colors" />
+                            </button>
+
+                            <button 
+                              onClick={() => setActiveTab('contact')}
+                              className="w-full flex items-center justify-between p-4 bg-white border border-stone-200 rounded-2xl hover:border-[#36533D] transition-all group"
+                            >
+                              <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                                  <Mail className="w-5 h-5" />
+                                </div>
+                                <div className="text-right">
+                                  <p className="text-sm font-bold text-stone-800">رسائل التواصل</p>
+                                  <p className="text-[10px] text-stone-500">متابعة استفسارات الزوار وطلبات الدعم</p>
+                                </div>
+                              </div>
+                              <Plus className="w-4 h-4 text-stone-300 group-hover:text-[#36533D] transition-colors" />
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="bg-[#1C1917] rounded-3xl p-6 text-white overflow-hidden relative">
+                          <div className="relative z-10">
+                            <h3 className="font-heading font-bold text-amber-300 mb-2">تأمين المنصة والرقابة</h3>
+                            <p className="text-xs text-stone-400 leading-relaxed mb-4">
+                              يمكنك الآن تتبع كافة التغييرات الحساسة عبر سجل العمليات الجديد لضمان أمان وشفافية الإدارة.
+                            </p>
+                            <button 
+                              onClick={() => setActiveTab('audit_logs')}
+                              className="text-xs font-bold bg-white/10 hover:bg-white/20 px-4 py-2 rounded-xl transition-all"
+                            >
+                              فتح سجل العمليات
+                            </button>
+                          </div>
+                          <Shield className="w-24 h-24 text-white/5 absolute -left-4 -bottom-4" />
+                        </div>
                       </div>
                     </div>
                   </div>
                 )}
 
-                {/* 2. SITE PREVIEW & DIRECT INSPECTION TAB */}
-                {activeTab === 'site_preview' && (
-                  <div className="space-y-6">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#E7E2D8]">
-                      <div>
-                        <h2 className="font-heading font-black text-xl text-stone-900">
-                          معاينة الموقع والتعديلات الحية
-                        </h2>
-                        <p className="text-xs text-stone-500 mt-0.5">
-                          تصفحي موقع "لسه في نور" مباشرة وتأكدي من ظهور كافة التعديلات والمقالات والتحديثات
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => onNavigate('/')}
-                        className="px-5 py-2.5 bg-[#36533D] hover:bg-[#2A4230] text-white text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md"
-                      >
-                        <ExternalLink className="w-4 h-4 text-amber-300" />
-                        <span>فتح الموقع في نافذة العرض الرئيسية</span>
-                      </button>
-                    </div>
-
-                    {/* Quick Section Cards to Jump Directly to Edits */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                      <div
-                        onClick={() => onNavigate('/')}
-                        className="p-5 bg-[#FAF7F2] border border-[#E7E2D8] hover:border-[#36533D]/40 rounded-2xl transition-all cursor-pointer group"
-                      >
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="w-8 h-8 rounded-xl bg-[#36533D]/10 text-[#36533D] flex items-center justify-center font-bold">
-                            🏡
-                          </span>
-                          <span className="text-[10px] text-[#36533D] font-bold bg-[#36533D]/10 px-2 py-0.5 rounded-full group-hover:bg-[#36533D] group-hover:text-white transition-colors">
-                            زيارة ←
-                          </span>
-                        </div>
-                        <h3 className="font-heading font-bold text-sm text-stone-900 mb-1">
-                          الصفحة الرئيسية
-                        </h3>
-                        <p className="text-[11px] text-stone-500 leading-relaxed">
-                          معاينة البانر الترحيبي، الاقتباس الملهم "قبس نور"، أحدث المقالات والرسائل.
-                        </p>
-                      </div>
-
-                      <div
-                        onClick={() => onNavigate('/articles')}
-                        className="p-5 bg-[#FAF7F2] border border-[#E7E2D8] hover:border-[#36533D]/40 rounded-2xl transition-all cursor-pointer group"
-                      >
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="w-8 h-8 rounded-xl bg-blue-50 text-blue-700 flex items-center justify-center font-bold">
-                            📖
-                          </span>
-                          <span className="text-[10px] text-blue-700 font-bold bg-blue-50 px-2 py-0.5 rounded-full group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                            زيارة ←
-                          </span>
-                        </div>
-                        <h3 className="font-heading font-bold text-sm text-stone-900 mb-1">
-                          الموضوعات والمقالات
-                        </h3>
-                        <p className="text-[11px] text-stone-500 leading-relaxed">
-                          مشاهدة المقالات المنشورة، التصنيفات، ومقالات الوعي والتعافي النفسي.
-                        </p>
-                      </div>
-
-                      <div
-                        onClick={() => onNavigate('/messages')}
-                        className="p-5 bg-[#FAF7F2] border border-[#E7E2D8] hover:border-[#36533D]/40 rounded-2xl transition-all cursor-pointer group"
-                      >
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="w-8 h-8 rounded-xl bg-amber-50 text-amber-700 flex items-center justify-center font-bold">
-                            💌
-                          </span>
-                          <span className="text-[10px] text-amber-700 font-bold bg-amber-50 px-2 py-0.5 rounded-full group-hover:bg-amber-600 group-hover:text-white transition-colors">
-                            زيارة ←
-                          </span>
-                        </div>
-                        <h3 className="font-heading font-bold text-sm text-stone-900 mb-1">
-                          رسائل لسه في نور
-                        </h3>
-                        <p className="text-[11px] text-stone-500 leading-relaxed">
-                          معاينة الرسائل الملهمة وبطاقات الاقتباسات اليومية والسكينة.
-                        </p>
-                      </div>
-
-                      <div
-                        onClick={() => onNavigate('/videos')}
-                        className="p-5 bg-[#FAF7F2] border border-[#E7E2D8] hover:border-[#36533D]/40 rounded-2xl transition-all cursor-pointer group"
-                      >
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="w-8 h-8 rounded-xl bg-purple-50 text-purple-700 flex items-center justify-center font-bold">
-                            🎬
-                          </span>
-                          <span className="text-[10px] text-purple-700 font-bold bg-purple-50 px-2 py-0.5 rounded-full group-hover:bg-purple-600 group-hover:text-white transition-colors">
-                            زيارة ←
-                          </span>
-                        </div>
-                        <h3 className="font-heading font-bold text-sm text-stone-900 mb-1">
-                          مكتبة الفيديوهات
-                        </h3>
-                        <p className="text-[11px] text-stone-500 leading-relaxed">
-                          مشاهدة مقاطع الفيديو والمحتوى المرئي وحلقات الدعم النفسي.
-                        </p>
-                      </div>
-
-                      <div
-                        onClick={() => onNavigate('/journeys')}
-                        className="p-5 bg-[#FAF7F2] border border-[#E7E2D8] hover:border-[#36533D]/40 rounded-2xl transition-all cursor-pointer group"
-                      >
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center font-bold">
-                            🧭
-                          </span>
-                          <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded-full group-hover:bg-emerald-600 group-hover:text-white transition-colors">
-                            زيارة ←
-                          </span>
-                        </div>
-                        <h3 className="font-heading font-bold text-sm text-stone-900 mb-1">
-                          رحلات التعافي
-                        </h3>
-                        <p className="text-[11px] text-stone-500 leading-relaxed">
-                          معاينة المسارات الإرشادية وخطوات التعافي الذاتي من الصدمات.
-                        </p>
-                      </div>
-
-                      <div
-                        onClick={() => onNavigate('/podcast')}
-                        className="p-5 bg-[#FAF7F2] border border-[#E7E2D8] hover:border-[#36533D]/40 rounded-2xl transition-all cursor-pointer group"
-                      >
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="w-8 h-8 rounded-xl bg-rose-50 text-rose-700 flex items-center justify-center font-bold">
-                            🎙️
-                          </span>
-                          <span className="text-[10px] text-rose-700 font-bold bg-rose-50 px-2 py-0.5 rounded-full group-hover:bg-rose-600 group-hover:text-white transition-colors">
-                            زيارة ←
-                          </span>
-                        </div>
-                        <h3 className="font-heading font-bold text-sm text-stone-900 mb-1">
-                          البودكاست الصوتي
-                        </h3>
-                        <p className="text-[11px] text-stone-500 leading-relaxed">
-                          مشاهدة الحلقات الصوتية ومشغل البودكاست والنصوص المرافقة.
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Interactive Info Window */}
-                    <div className="mt-6 border border-[#E7E2D8] rounded-2xl overflow-hidden shadow-xs bg-[#FAF7F2]">
-                      <div className="bg-stone-100 px-4 py-3 border-b border-[#E7E2D8] flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <span className="w-3 h-3 rounded-full bg-rose-400" />
-                          <span className="w-3 h-3 rounded-full bg-amber-400" />
-                          <span className="w-3 h-3 rounded-full bg-emerald-400" />
-                          <span className="text-xs font-mono text-stone-600 mr-2">لسه في نور — الموقع المباشر</span>
-                        </div>
-                        <button
-                          onClick={() => onNavigate('/')}
-                          className="px-3 py-1 rounded-lg bg-[#36533D] text-white text-xs font-bold hover:bg-[#2A4230] transition-colors flex items-center gap-1 cursor-pointer"
-                        >
-                          <span>عرض كامل في الصفحة</span>
-                          <ExternalLink className="w-3 h-3" />
-                        </button>
-                      </div>
-                      <div className="p-8 text-center bg-white">
-                        <div className="w-14 h-14 rounded-2xl bg-emerald-50 text-[#36533D] flex items-center justify-center mx-auto mb-4 border border-emerald-200 shadow-inner">
-                          <Eye className="w-7 h-7" />
-                        </div>
-                        <h3 className="font-heading font-bold text-base text-stone-900 mb-2">
-                          جميع تعديلاتك محفوظة ومنشورة مباشرة على المنصة
-                        </h3>
-                        <p className="text-xs text-stone-500 max-w-md mx-auto mb-5 leading-relaxed">
-                          يمكنكِ الانتقال للموقع في أي وقت لتجربة التصفح كزائر عادي ومشاهدة المقالات والرسائل والاقتباس الملهم بكل وضوح دون أن تحجب لوحة التحكم أي عنصر.
-                        </p>
-                        <button
-                          onClick={() => onNavigate('/')}
-                          className="px-6 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-stone-950 font-black text-xs inline-flex items-center gap-2 transition-all shadow-sm cursor-pointer"
-                        >
-                          <Eye className="w-4 h-4 text-stone-950" />
-                          <span>الذهاب إلى الصفحة الرئيسية ومعاينة كل شيء الآن</span>
-                          <ArrowLeft className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* 3. ARTICLES MANAGEMENT */}
-                {activeTab === 'articles' && (
+                {/* 2. CONTENT TABS */}
+                {activeTab === 'articles' && hasPermission('content.view') && (
                   <AdminArticlesTab
                     articles={articles}
                     categories={categories}
@@ -933,8 +719,7 @@ export function AdminDashboard({ onNavigate }: { onNavigate: (path: string) => v
                   />
                 )}
 
-                {/* 3. VIDEOS MANAGEMENT */}
-                {activeTab === 'videos' && (
+                {activeTab === 'videos' && hasPermission('content.view') && (
                   <AdminVideosTab
                     videos={videos}
                     categories={categories}
@@ -944,8 +729,7 @@ export function AdminDashboard({ onNavigate }: { onNavigate: (path: string) => v
                   />
                 )}
 
-                {/* 4. MESSAGES MANAGEMENT */}
-                {activeTab === 'messages' && (
+                {activeTab === 'messages' && hasPermission('content.view') && (
                   <AdminMessagesTab
                     messages={messages}
                     categories={categories}
@@ -955,8 +739,7 @@ export function AdminDashboard({ onNavigate }: { onNavigate: (path: string) => v
                   />
                 )}
 
-                {/* 5. JOURNEYS & PROGRAMS TAB */}
-                {activeTab === 'journeys' && (
+                {activeTab === 'journeys' && hasPermission('content.view') && (
                   <AdminJourneysTab
                     journeys={journeys}
                     categories={categories}
@@ -966,8 +749,7 @@ export function AdminDashboard({ onNavigate }: { onNavigate: (path: string) => v
                   />
                 )}
 
-                {/* 6. PODCASTS & AUDIO TAB */}
-                {activeTab === 'podcasts' && (
+                {activeTab === 'podcasts' && hasPermission('content.view') && (
                   <AdminPodcastsTab
                     podcasts={podcasts}
                     categories={categories}
@@ -977,20 +759,20 @@ export function AdminDashboard({ onNavigate }: { onNavigate: (path: string) => v
                   />
                 )}
 
-                {/* 7. SUBMISSIONS MODERATION ("احكي لنا") */}
-                {activeTab === 'submissions' && (
+                {activeTab === 'submissions' && hasPermission('content.view') && (
                   <AdminSubmissionsTab
                     submissions={submissions}
                     onUpdateStatus={handleUpdateSubmissionStatus}
                     onDelete={handleDeleteSubmission}
+                    onReload={() => loadTabData('submissions')}
                   />
                 )}
 
-                {/* 6. COMMENTS MODERATION */}
-                {activeTab === 'comments' && (
+                {activeTab === 'comments' && hasPermission('content.view') && (
                   <AdminCommentsTab
                     comments={comments}
-                    onUpdateStatus={handleCommentStatus}
+                    onStatusUpdate={handleCommentStatus}
+                    onReload={() => loadTabData('comments')}
                   />
                 )}
 
@@ -1078,8 +860,7 @@ export function AdminDashboard({ onNavigate }: { onNavigate: (path: string) => v
                   </div>
                 )}
 
-                {/* 8. MEDIA LIBRARY */}
-                {activeTab === 'media' && (
+                {activeTab === 'media' && hasPermission('content.view') && (
                   <div className="space-y-6">
                     <div className="flex items-center justify-between pb-4 border-b border-[#E7E2D8]">
                       <div>
@@ -1147,8 +928,7 @@ export function AdminDashboard({ onNavigate }: { onNavigate: (path: string) => v
                   </div>
                 )}
 
-                {/* 9. CONTACT MESSAGES */}
-                {activeTab === 'contact' && (
+                {activeTab === 'contact' && hasPermission('content.view') && (
                   <div className="space-y-6">
                     <div>
                       <h2 className="font-heading font-bold text-lg text-stone-900">رسائل التواصل الواردة</h2>
@@ -1173,12 +953,32 @@ export function AdminDashboard({ onNavigate }: { onNavigate: (path: string) => v
                   </div>
                 )}
 
-                {/* 10. USERS & MEMBERS MANAGEMENT (Admin Only) */}
-                {activeTab === 'users' && isAdmin && (
+                {/* 3. SECURITY & USERS TABS */}
+                {activeTab === 'audit_logs' && hasPermission('security.view_audit') && (
+                  <AdminAuditLogs 
+                    logs={auditLogs} 
+                    loading={loadingAudit} 
+                    onReload={() => loadAuditLogs()} 
+                  />
+                )}
+
+                {activeTab === 'roles' && isSuperAdmin && (
+                  <AdminRolesTab
+                    roles={roles}
+                    permissions={permissions}
+                    onReload={() => {
+                      loadRoles();
+                      loadPermissions();
+                    }}
+                  />
+                )}
+
+                {activeTab === 'users' && hasPermission('users.view') && (
                   <AdminUsersTab
                     users={filteredUsers}
                     currentUser={user}
                     isAdmin={isAdmin}
+                    isSuperAdmin={isSuperAdmin}
                     onAddUser={() => setIsAddingUser(true)}
                     onEditUser={handleOpenEditUser}
                     onDeleteUser={(u) => setUserToDelete(u)}
@@ -1191,8 +991,7 @@ export function AdminDashboard({ onNavigate }: { onNavigate: (path: string) => v
                   />
                 )}
 
-                {/* 11. SITE SETTINGS (Admin Only) */}
-                {activeTab === 'settings' && isAdmin && siteSettings && (
+                {activeTab === 'settings' && hasPermission('settings.view') && siteSettings && (
                   <form onSubmit={handleSaveSettings} className="space-y-6">
                     <div className="flex items-center justify-between pb-4 border-b border-[#E7E2D8]">
                       <div>
@@ -1429,11 +1228,10 @@ export function AdminDashboard({ onNavigate }: { onNavigate: (path: string) => v
                   </Modal>
                 )}
 
-              </>
-            )}
-          </div>
+            </div>
+          )}
         </div>
-      </div>
+      </main>
     </div>
   );
 }

@@ -7,11 +7,12 @@ interface AuthContextType {
   user: User | null;
   loading: boolean;
   isAdmin: boolean;
+  isSuperAdmin: boolean;
   isEditor: boolean;
   isLoggedIn: boolean;
+  hasPermission: (permission: string) => boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (name: string, email: string, password: string) => Promise<void>;
-  loginAsFatmaAdmin: () => Promise<void>;
   logout: () => void;
   updateProfile: (data: { name?: string; bio?: string; avatar?: string; password?: string }) => Promise<void>;
   isAuthModalOpen: boolean;
@@ -31,24 +32,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const token = localStorage.getItem('lesanour_token');
-    const hasExplicitlyLoggedOut = localStorage.getItem('lesanour_logged_out') === 'true';
-
-    if (!token && !hasExplicitlyLoggedOut) {
-      // Auto-activate Fatma Mohamed's Admin session on first load
-      api.quickAdminLogin('fatmamohamed36699@gmail.com')
-        .then((res) => {
-          localStorage.setItem('lesanour_token', res.token);
-          setUser(res.user);
-          showToast('أهلاً بكِ يا أستاذة فاطمة، تم تفعيل كامل صلاحيات الإدارة والتحكم 🛡️✨', 'success');
-        })
-        .catch(() => {
-          setUser(null);
-        })
-        .finally(() => {
-          setLoading(false);
-        });
-      return;
-    }
 
     if (!token) {
       setLoading(false);
@@ -60,39 +43,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(res.user);
       })
       .catch(() => {
-        // If expired, try quick admin login if not explicitly logged out
-        if (!hasExplicitlyLoggedOut) {
-          api.quickAdminLogin('fatmamohamed36699@gmail.com')
-            .then((res) => {
-              localStorage.setItem('lesanour_token', res.token);
-              setUser(res.user);
-            })
-            .catch(() => {
-              localStorage.removeItem('lesanour_token');
-              setUser(null);
-            })
-            .finally(() => {
-              setLoading(false);
-            });
-        } else {
-          localStorage.removeItem('lesanour_token');
-          setUser(null);
-          setLoading(false);
-        }
+        localStorage.removeItem('lesanour_token');
+        setUser(null);
       })
       .finally(() => {
         setLoading(false);
       });
   }, []);
-
-  const loginAsFatmaAdmin = async () => {
-    localStorage.removeItem('lesanour_logged_out');
-    const res = await api.quickAdminLogin('fatmamohamed36699@gmail.com');
-    localStorage.setItem('lesanour_token', res.token);
-    setUser(res.user);
-    setIsAuthModalOpen(false);
-    showToast('أهلاً بكِ يا فاطمة، تم تفعيل كامل صلاحيات المدير العام 🛡️✨', 'success');
-  };
 
   const login = async (email: string, password: string) => {
     localStorage.removeItem('lesanour_logged_out');
@@ -113,6 +70,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = () => {
+    // Attempt server-side logout for auditing, but don't wait for it to clear local state
+    api.logout().catch(() => {});
+    
     localStorage.removeItem('lesanour_token');
     localStorage.setItem('lesanour_logged_out', 'true');
     setUser(null);
@@ -134,9 +94,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsAuthModalOpen(false);
   };
 
-  const isAdmin = user?.role === 'ADMIN';
-  const isEditor = user?.role === 'ADMIN' || user?.role === 'EDITOR';
+  const isSuperAdmin = user?.role === 'SUPER_ADMIN';
+  const isAdmin = user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN';
+  const isEditor = user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN' || user?.role === 'EDITOR' || (user?.permissions?.includes('content.view') ?? false);
   const isLoggedIn = !!user;
+
+  const hasPermission = (permission: string) => {
+    if (isSuperAdmin) return true;
+    return user?.permissions?.includes(permission) || false;
+  };
 
   return (
     <AuthContext.Provider
@@ -144,11 +110,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user,
         loading,
         isAdmin,
+        isSuperAdmin,
         isEditor,
         isLoggedIn,
+        hasPermission,
         login,
         register,
-        loginAsFatmaAdmin,
         logout,
         updateProfile,
         isAuthModalOpen,

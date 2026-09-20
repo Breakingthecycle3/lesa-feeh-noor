@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { queryOne } from './db';
+import { queryOne, queryAll, execute } from './db';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'lesa-nour-secret-key-2026-safe';
 
@@ -8,7 +8,9 @@ export interface AuthUser {
   id: number;
   email: string;
   name: string;
-  role: 'ADMIN' | 'EDITOR' | 'USER';
+  role: 'SUPER_ADMIN' | 'ADMIN' | 'EDITOR' | 'USER';
+  role_id?: number;
+  permissions?: string[];
   avatar?: string;
   bio?: string;
 }
@@ -17,11 +19,24 @@ export interface AuthenticatedRequest extends Request {
   user?: AuthUser;
 }
 
+export function getUserPermissions(userId: number, roleId?: number): string[] {
+  if (!roleId) return [];
+  
+  const perms = queryAll<{ name: string }>(`
+    SELECT p.name 
+    FROM permissions p
+    JOIN role_permissions rp ON p.id = rp.permission_id
+    WHERE rp.role_id = ?
+  `, [roleId]);
+  
+  return perms.map((p: { name: string }) => p.name);
+}
+
 export function signToken(user: AuthUser): string {
   return jwt.sign(
-    { id: user.id, email: user.email, role: user.role },
+    { id: user.id, email: user.email, role: user.role, role_id: user.role_id },
     JWT_SECRET,
-    { expiresIn: '30d' }
+    { expiresIn: '24h' } // Reduced to 24h for better security
   );
 }
 
@@ -33,14 +48,14 @@ export function authenticateOptional(req: AuthenticatedRequest, res: Response, n
 
   const token = authHeader.split(' ')[1];
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as { id: number };
+    const decoded = jwt.verify(token, JWT_SECRET) as { id: number; role_id?: number };
     const user = queryOne<AuthUser>(
-      'SELECT id, email, name, role, avatar, bio FROM users WHERE id = ?',
+      'SELECT id, email, name, role, role_id, avatar, bio FROM users WHERE id = ?',
       [decoded.id]
     );
     if (user) {
-      if (user.email.toLowerCase() === 'fatmamohamed36699@gmail.com') {
-        user.role = 'ADMIN';
+      if (user.role_id) {
+        user.permissions = getUserPermissions(user.id, user.role_id);
       }
       req.user = user;
     }
@@ -58,17 +73,19 @@ export function requireAuth(req: AuthenticatedRequest, res: Response, next: Next
 
   const token = authHeader.split(' ')[1];
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as { id: number };
+    const decoded = jwt.verify(token, JWT_SECRET) as { id: number; role_id?: number };
     const user = queryOne<AuthUser>(
-      'SELECT id, email, name, role, avatar, bio FROM users WHERE id = ?',
+      'SELECT id, email, name, role, role_id, avatar, bio FROM users WHERE id = ?',
       [decoded.id]
     );
     if (!user) {
       return res.status(401).json({ error: 'المستخدم غير موجود' });
     }
-    if (user.email.toLowerCase() === 'fatmamohamed36699@gmail.com') {
-      user.role = 'ADMIN';
+    
+    if (user.role_id) {
+      user.permissions = getUserPermissions(user.id, user.role_id);
     }
+    
     req.user = user;
     next();
   } catch (err) {
@@ -76,9 +93,26 @@ export function requireAuth(req: AuthenticatedRequest, res: Response, next: Next
   }
 }
 
+export function hasPermission(req: AuthenticatedRequest, permission: string): boolean {
+  if (!req.user) return false;
+  if (req.user.role === 'SUPER_ADMIN') return true;
+  return req.user.permissions?.includes(permission) || false;
+}
+
+export function requirePermission(permission: string) {
+  return (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+    requireAuth(req, res, () => {
+      if (hasPermission(req, permission)) {
+        return next();
+      }
+      return res.status(403).json({ error: `ليس لديك صلاحية الوصول لهذه العملية (${permission})` });
+    });
+  };
+}
+
 export function requireEditor(req: AuthenticatedRequest, res: Response, next: NextFunction) {
   requireAuth(req, res, () => {
-    if (req.user?.role === 'ADMIN' || req.user?.role === 'EDITOR') {
+    if (req.user?.role === 'SUPER_ADMIN' || req.user?.role === 'ADMIN' || req.user?.role === 'EDITOR' || hasPermission(req, 'content.view')) {
       return next();
     }
     return res.status(403).json({ error: 'ليس لديك صلاحيات التحرير' });
@@ -87,9 +121,28 @@ export function requireEditor(req: AuthenticatedRequest, res: Response, next: Ne
 
 export function requireAdmin(req: AuthenticatedRequest, res: Response, next: NextFunction) {
   requireAuth(req, res, () => {
-    if (req.user?.role === 'ADMIN') {
+    if (req.user?.role === 'SUPER_ADMIN' || req.user?.role === 'ADMIN') {
       return next();
     }
     return res.status(403).json({ error: 'هذه العملية تتطلب صلاحيات المدير العام' });
   });
+}
+
+export function logAudit(user: AuthUser | undefined, action: string, resourceType: string, resourceId?: string, details?: any, status: 'success' | 'failure' = 'success') {
+  try {
+    execute(`
+      INSERT INTO audit_logs (user_id, user_name, action, resource_type, resource_id, details, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `, [
+      user?.id || null,
+      user?.name || 'Anonymous',
+      action,
+      resourceType,
+      resourceId || null,
+      details ? JSON.stringify(details) : null,
+      status
+    ]);
+  } catch (err) {
+    console.error('Audit log error:', err);
+  }
 }

@@ -14,12 +14,14 @@ interface AdminSubmissionsTabProps {
   submissions: Submission[];
   onUpdateStatus: (id: number, status: 'approved' | 'rejected' | 'published') => Promise<void>;
   onDelete: (id: number) => Promise<void>;
+  onReload?: () => Promise<void>;
 }
 
 export function AdminSubmissionsTab({ 
   submissions, 
   onUpdateStatus, 
-  onDelete 
+  onDelete,
+  onReload
 }: AdminSubmissionsTabProps) {
   return (
     <div className="space-y-6">
