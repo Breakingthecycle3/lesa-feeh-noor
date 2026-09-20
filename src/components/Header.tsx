@@ -27,7 +27,7 @@ export function Header({
   onOpenMoodModal?: () => void;
   onOpenQuoteModal?: () => void;
 }) {
-  const { user, isLoggedIn, isEditor, isAdmin, openAuthModal, logout } = useAuth();
+  const { user, isLoggedIn, isEditor, isAdmin, openAuthModal, logout, openLogoutModal } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
   const [bookmarkCount, setBookmarkCount] = useState(0);
@@ -232,15 +232,23 @@ export function Header({
                         <p className="font-bold text-sm text-stone-900 truncate">{user.name}</p>
                         <p className="text-xs text-stone-500 truncate">{user.email}</p>
                         <span className={`inline-block mt-1 px-2 py-0.5 rounded text-[10px] font-bold ${
-                          user.role === 'ADMIN'
+                          user.role === 'SUPER_ADMIN'
                             ? 'bg-amber-100 text-amber-900 border border-amber-300 font-black'
                             : user.role === 'EDITOR'
                             ? 'bg-emerald-100 text-emerald-800'
                             : 'bg-stone-100 text-stone-600'
                         }`}>
-                          {user.role === 'ADMIN' ? '🛡️ المدير العام (كافة الصلاحيات)' : user.role === 'EDITOR' ? 'محرر محتوى' : 'عضو متابع'}
+                          {user.role === 'SUPER_ADMIN' ? '🛡️ المدير العام (كافة الصلاحيات)' : user.role === 'EDITOR' ? 'محرر محتوى' : 'عضو متابع'}
                         </span>
                       </div>
+
+                      <button
+                        onClick={() => handleNav('/profile')}
+                        className="w-full px-4 py-2.5 text-xs font-bold text-stone-700 hover:bg-stone-50 flex items-center gap-2.5 transition-colors cursor-pointer"
+                      >
+                        <UserIcon className="w-4 h-4 text-[#36533D]" />
+                        <span>إعدادات حسابي</span>
+                      </button>
 
                       {(isAdmin || isEditor) && (
                         <button
@@ -272,7 +280,7 @@ export function Header({
                         <button
                           onClick={() => {
                             setUserDropdownOpen(false);
-                            logout();
+                            openLogoutModal();
                           }}
                           className="w-full px-4 py-2 text-xs text-rose-600 hover:bg-rose-50 flex items-center gap-2.5 transition-colors cursor-pointer"
                         >
@@ -384,6 +392,16 @@ export function Header({
                 </button>
               )}
 
+              {isLoggedIn && (
+                <button
+                  onClick={() => handleNav('/profile')}
+                  className="w-full text-right px-4 py-3 rounded-xl text-sm font-bold text-stone-700 hover:bg-stone-100 flex items-center gap-2 transition-colors cursor-pointer mt-1"
+                >
+                  <UserIcon className="w-4 h-4 text-[#36533D]" />
+                  <span>إعدادات حسابي الشخصي</span>
+                </button>
+              )}
+
               <button
                 onClick={() => handleNav('/bookmarks')}
                 className="w-full text-right px-4 py-3 rounded-xl text-sm font-bold text-stone-700 hover:bg-stone-100 flex items-center justify-between transition-colors cursor-pointer"
@@ -412,8 +430,7 @@ export function Header({
                   <button
                     onClick={() => {
                       setMobileMenuOpen(false);
-                      logout();
-                      onNavigate('/');
+                      openLogoutModal();
                     }}
                     className="w-full text-right px-4 py-3 rounded-xl text-sm font-bold text-rose-600 bg-rose-50 border border-rose-100 flex items-center gap-2 cursor-pointer"
                   >

@@ -24,14 +24,16 @@ import { AboutPage } from './pages/AboutPage';
 import { ContactPage } from './pages/ContactPage';
 import { ChatPage } from './pages/ChatPage';
 import { AdminDashboard } from './pages/AdminDashboard';
+import { ProfilePage } from './pages/ProfilePage';
 import { EmptyState } from './components/Common';
 import { ReadingProgressBar } from './components/ReadingProgressBar';
 import { MoodModal } from './components/MoodModal';
 import { InspiringQuoteModal } from './components/InspiringQuoteModal';
 import { FloatingChatWidget } from './components/FloatingChatWidget';
+import { LogoutConfirmModal } from './components/modals/LogoutConfirmModal';
 
 function AppContent() {
-  const { isAdmin, isEditor } = useAuth();
+  const { isAdmin, isEditor, logout } = useAuth();
   const [currentPath, setCurrentPath] = useState<string>(() => {
     return (window.location.pathname || '/') + (window.location.search || '');
   });
@@ -164,6 +166,11 @@ function AppContent() {
       return <ChatPage onNavigate={navigate} />;
     }
 
+    // 14. Profile Page ("حسابي")
+    if (currentPath === '/profile') {
+      return <ProfilePage onNavigate={navigate} />;
+    }
+
     // 14. Categories route shortcut (/categories/:slug)
     if (currentPath.startsWith('/categories/')) {
       return <ArticlesPage onNavigate={navigate} />;
@@ -228,6 +235,12 @@ function AppContent() {
 
       {/* Auth Modal */}
       <AuthModal />
+
+      {/* Logout Confirmation Modal */}
+      <LogoutConfirmModal onConfirm={() => {
+        logout();
+        navigate('/');
+      }} />
 
       {/* Gemini AI Floating Chatbot Widget */}
       <FloatingChatWidget

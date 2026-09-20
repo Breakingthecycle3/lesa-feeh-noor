@@ -98,7 +98,7 @@ interface AdminSidebarProps {
 }
 
 export function AdminSidebar({ activeTab, onTabChange, onNavigate, isCollapsed, setIsCollapsed }: AdminSidebarProps) {
-  const { user, logout, hasPermission } = useAuth();
+  const { user, logout, hasPermission, openLogoutModal } = useAuth();
 
   return (
     <aside 
@@ -211,11 +211,8 @@ export function AdminSidebar({ activeTab, onTabChange, onNavigate, isCollapsed, 
           </button>
           
           <button
-            onClick={() => {
-              logout();
-              onNavigate('/');
-            }}
-            className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 transition-all"
+            onClick={openLogoutModal}
+            className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 transition-all cursor-pointer"
             title={isCollapsed ? 'تسجيل الخروج' : ''}
           >
             <LogOut className="w-5 h-5" />
