@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Sparkles, Quote, Copy, Check, Share2, ArrowRight, Edit, Shield } from 'lucide-react';
+import { Sparkles, Quote, Copy, Check, Share2, ArrowRight, Edit, Shield, Volume2 } from 'lucide-react';
 import { Message } from '../types';
 import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { Breadcrumbs, LoadingState, ErrorState, SEOHead } from '../components/Common';
 import { MessageEditModal } from '../components/MessageEditModal';
+import { ArticleAudioPlayer } from '../components/ArticleAudioPlayer';
 
 export function MessageDetailPage({
   slug,
@@ -160,6 +161,12 @@ export function MessageDetailPage({
           {message.title}
         </h1>
 
+        <ArticleAudioPlayer 
+          title={message.title}
+          content={message.text}
+          excerpt={message.category_name}
+        />
+
         <div className="max-w-xl mx-auto my-6">
           <p className="font-heading font-medium text-lg sm:text-xl md:text-2xl text-stone-800 leading-relaxed">
             "{message.text}"
@@ -182,6 +189,25 @@ export function MessageDetailPage({
               <span>تعديل الرسالة</span>
             </button>
           )}
+
+          <button
+            onClick={() => {
+              const player = document.getElementById('article-audio-player');
+              if (player) {
+                player.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                const playBtn = document.getElementById('tts-play-toggle');
+                if (playBtn) {
+                  setTimeout(() => {
+                    (playBtn as HTMLButtonElement).click();
+                  }, 800);
+                }
+              }
+            }}
+            className="px-5 py-2.5 bg-amber-50 border border-amber-200 hover:bg-amber-100 text-[#36533D] font-bold rounded-xl text-xs flex items-center gap-2 cursor-pointer shadow-sm transition-all"
+          >
+            <Volume2 className="w-4 h-4" />
+            <span>استماع للرسالة</span>
+          </button>
 
           <button
             onClick={copyText}

@@ -187,12 +187,25 @@ export const api = {
 
   // Bookmarks
   getBookmarks: () =>
-    request<{ bookmarks: Array<{ content_type: string; content_id: number }> }>('/api/bookmarks'),
+    request<{
+      bookmarks: Array<{
+        id: number;
+        content_type: string;
+        content_id: number;
+        category: string | null;
+      }>;
+    }>('/api/bookmarks'),
 
-  toggleBookmark: (content_type: string, content_id: number) =>
+  toggleBookmark: (content_type: string, content_id: number, category?: string) =>
     request<{ bookmarked: boolean }>('/api/bookmarks', {
       method: 'POST',
-      body: JSON.stringify({ content_type, content_id })
+      body: JSON.stringify({ content_type, content_id, category })
+    }),
+
+  updateBookmarkCategory: (content_type: string, content_id: number, category: string | null) =>
+    request<{ success: boolean }>('/api/bookmarks/category', {
+      method: 'PATCH',
+      body: JSON.stringify({ content_type, content_id, category })
     }),
 
   // Gemini Chatbot (Multi-turn & Specialized Roles)

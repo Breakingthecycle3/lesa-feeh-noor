@@ -53,6 +53,18 @@ export async function getDb(): Promise<Database> {
       if (!columns.includes('two_factor_secret')) {
         dbInstance.run("ALTER TABLE users ADD COLUMN two_factor_secret TEXT");
       }
+      if (!columns.includes('status')) {
+        dbInstance.run("ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'active'");
+      }
+    }
+
+    // Migration: Add category column to bookmarks table if it doesn't exist
+    const bookmarksInfo = dbInstance.exec("PRAGMA table_info(bookmarks)");
+    if (bookmarksInfo.length > 0) {
+      const columns = bookmarksInfo[0].values.map(v => v[1] as string);
+      if (!columns.includes('category')) {
+        dbInstance.run("ALTER TABLE bookmarks ADD COLUMN category TEXT");
+      }
     }
   } catch (err) {
     console.error('Migration failed:', err);
@@ -362,6 +374,7 @@ function initSchema(db: Database) {
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       content_type TEXT NOT NULL, -- 'article', 'video', 'message', 'podcast', 'journey'
       content_id INTEGER NOT NULL,
+      category TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(user_id, content_type, content_id)
     );

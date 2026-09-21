@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Bookmark, Sparkles, BookOpen, Trash2, ArrowRight } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { Bookmark, Sparkles, BookOpen, Trash2, ArrowRight, FolderPlus, Folder, Filter, Tag, Check, X, Edit3 } from 'lucide-react';
 import { Article } from '../types';
 import { api } from '../lib/api';
 import { ArticleCard } from '../components/Cards';
@@ -9,36 +9,50 @@ import {
   removeFavoriteArticle,
   onFavoritesChanged
 } from '../lib/favorites';
+import { motion, AnimatePresence } from 'motion/react';
+
+interface CategorizedArticle extends Article {
+  bookmarkCategory: string | null;
+}
 
 export function BookmarksPage({ onNavigate }: { onNavigate: (path: string) => void }) {
-  const [savedArticles, setSavedArticles] = useState<Article[]>([]);
+  const [savedArticles, setSavedArticles] = useState<CategorizedArticle[]>([]);
   const [loading, setLoading] = useState(true);
+  const [activeCategory, setActiveCategory] = useState<string>('all');
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [newCategoryName, setNewCategoryName] = useState('');
 
   const loadSavedContent = useCallback(async () => {
     // 1. Instantly retrieve locally saved articles from localStorage
     const localArticles = getFavoriteArticles();
-    let mergedArticles = [...localArticles];
+    let mergedArticles: CategorizedArticle[] = localArticles.map(a => ({ ...a, bookmarkCategory: null }));
 
     try {
       // 2. Try fetching server bookmarks if logged in
       const bmRes = await api.getBookmarks();
-      const articleIds = bmRes.bookmarks
-        ?.filter((b) => b.content_type === 'article')
-        .map((b) => b.content_id) || [];
+      const bookmarks = bmRes.bookmarks || [];
+      const articleBookmarks = bookmarks.filter((b) => b.content_type === 'article');
+      const articleIds = articleBookmarks.map((b) => b.content_id);
 
       if (articleIds.length > 0) {
-        const artRes = await api.getArticles({ limit: 50 });
-        const serverFiltered = (artRes.articles || []).filter((a) => articleIds.includes(a.id));
+        const artRes = await api.getArticles({ limit: 100 });
+        const allArticles = artRes.articles || [];
         
-        // Merge without duplicates
-        serverFiltered.forEach((srvArt) => {
-          if (!mergedArticles.some((m) => m.id === srvArt.id || m.slug === srvArt.slug)) {
-            mergedArticles.push(srvArt);
+        // Merge without duplicates and assign categories
+        articleBookmarks.forEach((bm) => {
+          const srvArt = allArticles.find(a => a.id === bm.content_id);
+          if (srvArt) {
+            const existingIdx = mergedArticles.findIndex(m => m.id === srvArt.id);
+            if (existingIdx > -1) {
+              mergedArticles[existingIdx].bookmarkCategory = bm.category;
+            } else {
+              mergedArticles.push({ ...srvArt, bookmarkCategory: bm.category });
+            }
           }
         });
       }
-    } catch {
-      // Guest or offline: local favorites are fully displayed
+    } catch (err) {
+      console.error('Error loading bookmarks:', err);
     }
 
     setSavedArticles(mergedArticles);
@@ -52,6 +66,31 @@ export function BookmarksPage({ onNavigate }: { onNavigate: (path: string) => vo
     });
     return unsubscribe;
   }, [loadSavedContent]);
+
+  const categories = useMemo(() => {
+    const cats = new Set<string>();
+    savedArticles.forEach(a => {
+      if (a.bookmarkCategory) cats.add(a.bookmarkCategory);
+    });
+    return Array.from(cats);
+  }, [savedArticles]);
+
+  const filteredArticles = useMemo(() => {
+    if (activeCategory === 'all') return savedArticles;
+    if (activeCategory === 'uncategorized') return savedArticles.filter(a => !a.bookmarkCategory);
+    return savedArticles.filter(a => a.bookmarkCategory === activeCategory);
+  }, [savedArticles, activeCategory]);
+
+  const handleUpdateCategory = async (articleId: number, category: string | null) => {
+    try {
+      await api.updateBookmarkCategory('article', articleId, category);
+      await loadSavedContent();
+      setEditingId(null);
+      setNewCategoryName('');
+    } catch (err) {
+      console.error('Failed to update category:', err);
+    }
+  };
 
   const handleClearAll = () => {
     if (window.confirm('هل تودين مسح جميع المقالات المحفوظة من المفضلة في متصفحكِ؟')) {
@@ -83,7 +122,7 @@ export function BookmarksPage({ onNavigate }: { onNavigate: (path: string) => vo
             الموضوعات التي قمتِ بحفظها
           </h1>
           <p className="font-body text-sm text-stone-600 leading-relaxed">
-            احتفظي هنا بكل مقال لامس قلبكِ أو منحكِ طمأنينة لتعودي إليه حين تحتاجين السكينة، محفوظة في متصفحكِ للرجوع إليها دائماً.
+            احتفظي هنا بكل مقال لامس قلبكِ أو منحكِ طمأنينة لتعودي إليه حين تحتاجين السكينة، يمكنكِ الآن تنظيم مقالاتكِ في تصنيفات مخصصة.
           </p>
         </div>
 
@@ -107,16 +146,105 @@ export function BookmarksPage({ onNavigate }: { onNavigate: (path: string) => vo
       {loading ? (
         <LoadingState message="نستحضر محفوظاتكِ..." />
       ) : savedArticles.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {savedArticles.map((art) => (
-            <ArticleCard
-              key={art.id}
-              article={art}
-              isBookmarked={true}
-              onBookmarkChange={loadSavedContent}
-              onNavigate={onNavigate}
-            />
-          ))}
+        <div className="space-y-8">
+          {/* Categories Selector */}
+          <div className="flex flex-wrap gap-2 mb-8 p-1.5 bg-stone-100/50 rounded-2xl border border-stone-200/50">
+            <button
+              onClick={() => setActiveCategory('all')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                activeCategory === 'all'
+                  ? 'bg-[#36533D] text-white shadow-md'
+                  : 'text-stone-600 hover:bg-stone-200/60'
+              }`}
+            >
+              الكل
+            </button>
+            {categories.map(cat => (
+              <button
+                key={cat}
+                onClick={() => setActiveCategory(cat)}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                  activeCategory === cat
+                    ? 'bg-[#36533D] text-white shadow-md'
+                    : 'text-stone-600 hover:bg-stone-200/60'
+                }`}
+              >
+                <Folder className="w-3 h-3" />
+                <span>{cat}</span>
+              </button>
+            ))}
+            <button
+              onClick={() => setActiveCategory('uncategorized')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                activeCategory === 'uncategorized'
+                  ? 'bg-[#36533D] text-white shadow-md'
+                  : 'text-stone-600 hover:bg-stone-200/60'
+              }`}
+            >
+              غير مصنف
+            </button>
+          </div>
+
+          {/* Articles Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-10">
+            {filteredArticles.map((art) => (
+              <div key={art.id} className="flex flex-col space-y-4">
+                <ArticleCard
+                  article={art}
+                  isBookmarked={true}
+                  onBookmarkChange={loadSavedContent}
+                  onNavigate={onNavigate}
+                />
+                
+                {/* Category Management UI */}
+                <div className="px-1">
+                  {editingId === art.id ? (
+                    <div className="flex items-center gap-2 bg-stone-50 p-2 rounded-xl border border-[#E7E2D8]">
+                      <input
+                        type="text"
+                        value={newCategoryName}
+                        onChange={(e) => setNewCategoryName(e.target.value)}
+                        placeholder="اسم التصنيف..."
+                        className="flex-1 bg-transparent border-none text-xs focus:ring-0 px-2"
+                        autoFocus
+                      />
+                      <button
+                        onClick={() => handleUpdateCategory(art.id, newCategoryName)}
+                        className="p-1 text-green-600 hover:bg-green-50 rounded-lg"
+                      >
+                        <Check className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => setEditingId(null)}
+                        className="p-1 text-stone-400 hover:bg-stone-100 rounded-lg"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5">
+                        <Tag className="w-3.5 h-3.5 text-stone-400" />
+                        <span className="text-xs font-medium text-stone-500">
+                          {art.bookmarkCategory || 'بدون تصنيف'}
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setEditingId(art.id);
+                          setNewCategoryName(art.bookmarkCategory || '');
+                        }}
+                        className="text-[10px] font-bold text-[#36533D] hover:underline flex items-center gap-1"
+                      >
+                        <Edit3 className="w-3 h-3" />
+                        <span>{art.bookmarkCategory ? 'تغيير التصنيف' : 'إضافة تصنيف'}</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       ) : (
         <EmptyState

@@ -1136,7 +1136,7 @@ apiRouter.get('/popular', (_req: Request, res: Response) => {
 apiRouter.get('/bookmarks', requireAuth, (req: AuthenticatedRequest, res: Response) => {
   const userId = req.user!.id;
   const bookmarks = queryAll(
-    'SELECT content_type, content_id, created_at FROM bookmarks WHERE user_id = ? ORDER BY created_at DESC',
+    'SELECT id, content_type, content_id, category, created_at FROM bookmarks WHERE user_id = ? ORDER BY created_at DESC',
     [userId]
   );
   res.json({ bookmarks });
@@ -1144,7 +1144,7 @@ apiRouter.get('/bookmarks', requireAuth, (req: AuthenticatedRequest, res: Respon
 
 apiRouter.post('/bookmarks', requireAuth, (req: AuthenticatedRequest, res: Response) => {
   const userId = req.user!.id;
-  const { content_type, content_id } = req.body;
+  const { content_type, content_id, category } = req.body;
 
   if (!content_type || !content_id) {
     return res.status(400).json({ error: 'المعطيات ناقصة' });
@@ -1160,11 +1160,27 @@ apiRouter.post('/bookmarks', requireAuth, (req: AuthenticatedRequest, res: Respo
     return res.json({ bookmarked: false });
   } else {
     execute(
-      'INSERT INTO bookmarks (user_id, content_type, content_id) VALUES (?, ?, ?)',
-      [userId, content_type, content_id]
+      'INSERT INTO bookmarks (user_id, content_type, content_id, category) VALUES (?, ?, ?, ?)',
+      [userId, content_type, content_id, category || null]
     );
     return res.json({ bookmarked: true });
   }
+});
+
+apiRouter.patch('/bookmarks/category', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+  const userId = req.user!.id;
+  const { content_type, content_id, category } = req.body;
+
+  if (!content_type || !content_id) {
+    return res.status(400).json({ error: 'المعطيات ناقصة' });
+  }
+
+  execute(
+    'UPDATE bookmarks SET category = ? WHERE user_id = ? AND content_type = ? AND content_id = ?',
+    [category || null, userId, content_type, content_id]
+  );
+
+  res.json({ success: true });
 });
 
 // ==========================================

@@ -14,7 +14,8 @@ import {
   Video as VideoIcon,
   ArrowLeft,
   Edit,
-  Shield
+  Shield,
+  Volume2
 } from 'lucide-react';
 import { Article, Video, Comment } from '../types';
 import { api } from '../lib/api';
@@ -294,6 +295,26 @@ export function ArticleDetailPage({
                 <span>تعديل الموضوع</span>
               </button>
             )}
+
+            <button
+              onClick={() => {
+                const player = document.getElementById('article-audio-player');
+                if (player) {
+                  player.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  // Optionally trigger play automatically
+                  const playBtn = document.getElementById('tts-play-toggle');
+                  if (playBtn) {
+                    setTimeout(() => {
+                      (playBtn as HTMLButtonElement).click();
+                    }, 800);
+                  }
+                }
+              }}
+              className="px-3.5 py-2 sm:px-4 sm:py-2.5 rounded-xl border border-amber-200 bg-amber-50/50 text-[#36533D] hover:bg-amber-100 transition-all cursor-pointer flex items-center gap-2 text-xs font-bold shadow-2xs"
+            >
+              <Volume2 className="w-4 h-4" />
+              <span>استماع للمقال</span>
+            </button>
 
             <button
               onClick={toggleBookmark}

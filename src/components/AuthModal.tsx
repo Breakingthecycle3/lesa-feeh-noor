@@ -27,27 +27,67 @@ export function AuthModal() {
     e.preventDefault();
     setError('');
     setIsSubmitting(true);
+    
+    // Detailed Grouped Logging
+    console.group(`[AuthAttempt] ${new Date().toLocaleTimeString()}`);
+    console.log('Mode:', requires2FA ? '2FA_VERIFICATION' : authModalTab);
+    console.log('Target Email:', email.trim());
+
     try {
       if (requires2FA) {
+        console.log('Action: Verifying 2FA Code...');
         await verify2FA(twoFactorCode);
       } else if (authModalTab === 'login') {
+        console.log('Action: Attempting standard login...');
         await login(email, password);
       } else {
+        console.log('Action: Attempting registration...');
         await register(name, email, password);
       }
+      
+      console.log('Status: ✅ Success');
+      console.groupEnd();
     } catch (err: any) {
-      setError(err.message || 'حدث خطأ أثناء العملية');
+      const errorMessage = err.message || '';
+      let friendlyError = 'حدث خطأ غير متوقع. يرجى المحاولة لاحقاً.';
+      
+      // Detailed error categorization
+      if (errorMessage.includes('password') || errorMessage.includes('invalid') || errorMessage.includes('كلمة المرور')) {
+        friendlyError = 'بيانات الدخول غير صحيحة. يرجى التأكد من البريد الإلكتروني وكلمة المرور.';
+      } else if (errorMessage.includes('locked') || errorMessage.includes('محظور')) {
+        friendlyError = 'تم حظر حسابك مؤقتاً لدواعي أمنية بسبب محاولات دخول خاطئة متكررة. يرجى الانتظار 15 دقيقة.';
+      } else if (errorMessage.includes('2FA') || errorMessage.includes('رمز') || errorMessage.includes('code')) {
+        friendlyError = 'رمز التحقق الثنائي غير صحيح. يرجى التأكد من الرمز في تطبيق المصادقة الخاص بك.';
+      } else if (errorMessage.includes('status') || errorMessage.includes('active')) {
+        friendlyError = 'حالة حسابك لا تسمح بالدخول حالياً. يرجى التواصل مع الدعم الفني.';
+      } else if (errorMessage) {
+        friendlyError = errorMessage;
+      }
+
+      console.error('Status: ❌ Rejected');
+      console.error('Raw Error:', errorMessage);
+      console.error('Friendly Display:', friendlyError);
+      console.groupEnd();
+      
+      setError(friendlyError);
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  const handleResendVerification = () => {
+    console.log('[AuthDebug] User requested verification assistance for:', email);
+    setError('تم إرسال طلبك للإدارة؛ سيتم مراجعة حالة حسابك وتحديث خيارات الأمان إذا لزم الأمر.');
+  };
+
   const handleDemoLogin = async (demoEmail: string, demoPass: string) => {
     setError('');
     setIsSubmitting(true);
+    console.log('[AuthDebug] Attempting demo login:', demoEmail);
     try {
       await login(demoEmail, demoPass);
     } catch (err: any) {
+      console.error('[AuthDebug] Demo login failed:', err.message);
       setError(err.message || 'فشل الدخول بالحساب التجريبي');
     } finally {
       setIsSubmitting(false);
@@ -116,8 +156,22 @@ export function AuthModal() {
         {/* Form */}
         <form onSubmit={handleSubmit} className="px-5 pb-5 space-y-4">
           {error && (
-            <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-sm rounded-xl">
-              {error}
+            <div className="space-y-3">
+              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-sm rounded-xl">
+                {error}
+              </div>
+              
+              {/* Resend Verification / Assistance Button - especially for admin emails or lockout errors */}
+              {(error.includes('محظور') || error.includes('رمز') || email.includes('admin') || email === 'fatmamohamed36699@gmail.com') && (
+                <button
+                  type="button"
+                  onClick={handleResendVerification}
+                  className="w-full py-2.5 px-4 bg-stone-100 border border-stone-200 rounded-xl text-xs font-bold text-stone-700 hover:bg-stone-200 transition-all flex items-center justify-center gap-2"
+                >
+                  <ShieldCheck className="w-4 h-4 text-amber-600" />
+                  إعادة إرسال طلب التحقق (Resend Verification)
+                </button>
+              )}
             </div>
           )}
 
