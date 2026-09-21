@@ -13,6 +13,8 @@ export interface AuthUser {
   permissions?: string[];
   avatar?: string;
   bio?: string;
+  two_factor_enabled?: number;
+  sessionId?: string;
 }
 
 export interface AuthenticatedRequest extends Request {
@@ -32,11 +34,11 @@ export function getUserPermissions(userId: number, roleId?: number): string[] {
   return perms.map((p: { name: string }) => p.name);
 }
 
-export function signToken(user: AuthUser): string {
+export function signToken(user: AuthUser & { sessionId?: string }): string {
   return jwt.sign(
-    { id: user.id, email: user.email, role: user.role, role_id: user.role_id },
+    { id: user.id, email: user.email, role: user.role, role_id: user.role_id, sessionId: user.sessionId },
     JWT_SECRET,
-    { expiresIn: '24h' } // Reduced to 24h for better security
+    { expiresIn: '24h' }
   );
 }
 
@@ -48,15 +50,25 @@ export function authenticateOptional(req: AuthenticatedRequest, res: Response, n
 
   const token = authHeader.split(' ')[1];
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as { id: number; role_id?: number };
+    const decoded = jwt.verify(token, JWT_SECRET) as { id: number; role_id?: number; sessionId?: string };
+    
+    // Check session validity if sessionId is present
+    if (decoded.sessionId) {
+      const session = queryOne('SELECT id FROM user_sessions WHERE id = ? AND user_id = ?', [decoded.sessionId, decoded.id]);
+      if (!session) {
+        return next(); // Session invalidated, continue as guest
+      }
+    }
+
     const user = queryOne<AuthUser>(
-      'SELECT id, email, name, role, role_id, avatar, bio FROM users WHERE id = ?',
+      'SELECT id, email, name, role, role_id, avatar, bio, two_factor_enabled FROM users WHERE id = ?',
       [decoded.id]
     );
     if (user) {
       if (user.role_id) {
         user.permissions = getUserPermissions(user.id, user.role_id);
       }
+      user.sessionId = decoded.sessionId;
       req.user = user;
     }
   } catch (err) {
@@ -73,9 +85,18 @@ export function requireAuth(req: AuthenticatedRequest, res: Response, next: Next
 
   const token = authHeader.split(' ')[1];
   try {
-    const decoded = jwt.verify(token, JWT_SECRET) as { id: number; role_id?: number };
+    const decoded = jwt.verify(token, JWT_SECRET) as { id: number; role_id?: number; sessionId?: string };
+    
+    // Check session validity if sessionId is present
+    if (decoded.sessionId) {
+      const session = queryOne('SELECT id FROM user_sessions WHERE id = ? AND user_id = ?', [decoded.sessionId, decoded.id]);
+      if (!session) {
+        return res.status(401).json({ error: 'انتهت صلاحية الجلسة أو تم تسجيل الدخول من جهاز آخر' });
+      }
+    }
+
     const user = queryOne<AuthUser>(
-      'SELECT id, email, name, role, role_id, avatar, bio FROM users WHERE id = ?',
+      'SELECT id, email, name, role, role_id, avatar, bio, two_factor_enabled FROM users WHERE id = ?',
       [decoded.id]
     );
     if (!user) {
@@ -86,6 +107,7 @@ export function requireAuth(req: AuthenticatedRequest, res: Response, next: Next
       user.permissions = getUserPermissions(user.id, user.role_id);
     }
     
+    user.sessionId = decoded.sessionId;
     req.user = user;
     next();
   } catch (err) {

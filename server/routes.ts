@@ -11,10 +11,48 @@ import {
   logAudit,
   signToken
 } from './auth';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const { authenticator } = require('otplib');
+import QRCode from 'qrcode';
 import { generateSpeechFromText } from './tts';
 import { CHAT_ROLES, processChatMessage, ChatRoleId } from './geminiChat';
 
 export const apiRouter = Router();
+
+// ==========================================
+// HELPERS
+// ==========================================
+
+async function getSiteSettings(): Promise<Record<string, any>> {
+  const rows = queryAll<{ key: string; value: string }>('SELECT key, value FROM site_settings');
+  const settings: Record<string, any> = {};
+  for (const r of rows) {
+    settings[r.key] = r.value;
+  }
+  return settings;
+}
+
+function validatePassword(password: string, settings: Record<string, any>): string | null {
+  const minLength = parseInt(settings.security_min_password_length || '6');
+  if (password.length < minLength) {
+    return `كلمة المرور يجب أن لا تقل عن ${minLength} أحرف`;
+  }
+
+  if (settings.security_require_special_char === 'true' && !/[!@#$%^&*(),.?":{}|<>]/.test(password)) {
+    return 'كلمة المرور يجب أن تحتوي على رمز خاص واحد على الأقل';
+  }
+
+  if (settings.security_require_number === 'true' && !/\d/.test(password)) {
+    return 'كلمة المرور يجب أن تحتوي على رقم واحد على الأقل';
+  }
+
+  if (settings.security_require_uppercase === 'true' && !/[A-Z]/.test(password)) {
+    return 'كلمة المرور يجب أن تحتوي على حرف كبير واحد على الأقل';
+  }
+
+  return null;
+}
 
 // ==========================================
 // 1. AUTHENTICATION & PROFILE
@@ -27,6 +65,8 @@ apiRouter.post('/auth/login', async (req: Request, res: Response) => {
   }
 
   const normalizedEmail = email.trim().toLowerCase();
+  const settings = await getSiteSettings();
+
   const user = queryOne<{
     id: number;
     email: string;
@@ -37,10 +77,19 @@ apiRouter.post('/auth/login', async (req: Request, res: Response) => {
     avatar?: string;
     bio?: string;
     status: string;
+    two_factor_enabled?: number;
+    failed_login_attempts: number;
+    locked_until: string | null;
   }>('SELECT * FROM users WHERE LOWER(email) = ?', [normalizedEmail]);
 
   if (!user) {
     return res.status(401).json({ error: 'البريد الإلكتروني أو كلمة المرور غير صحيحة' });
+  }
+
+  // Check if locked
+  if (user.locked_until && new Date(user.locked_until) > new Date()) {
+    const remainingMinutes = Math.ceil((new Date(user.locked_until).getTime() - new Date().getTime()) / 60000);
+    return res.status(403).json({ error: `الحساب محظور مؤقتاً بسبب محاولات دخول خاطئة كثيرة. يرجى المحاولة بعد ${remainingMinutes} دقيقة.` });
   }
 
   if (user.status === 'suspended') {
@@ -48,12 +97,43 @@ apiRouter.post('/auth/login', async (req: Request, res: Response) => {
   }
 
   const valid = await bcrypt.compare(password, user.password_hash);
+  
   if (!valid) {
-    return res.status(401).json({ error: 'البريد الإلكتروني أو كلمة المرور غير صحيحة' });
+    const maxAttempts = parseInt(settings.security_max_login_attempts || '5');
+    const newAttempts = user.failed_login_attempts + 1;
+    
+    if (newAttempts >= maxAttempts) {
+      const lockoutMinutes = parseInt(settings.security_lockout_duration_minutes || '15');
+      const lockedUntil = new Date(Date.now() + lockoutMinutes * 60000).toISOString();
+      execute('UPDATE users SET failed_login_attempts = ?, locked_until = ? WHERE id = ?', [newAttempts, lockedUntil, user.id]);
+      return res.status(403).json({ error: `تم حظر الحساب لمدة ${lockoutMinutes} دقيقة بسبب تجاوز حد محاولات الدخول.` });
+    } else {
+      execute('UPDATE users SET failed_login_attempts = ? WHERE id = ?', [newAttempts, user.id]);
+      return res.status(401).json({ error: 'البريد الإلكتروني أو كلمة المرور غير صحيحة' });
+    }
   }
 
-  // Update last login
-  execute('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?', [user.id]);
+  // Login successful - Reset failed attempts
+  execute('UPDATE users SET failed_login_attempts = 0, locked_until = NULL, last_login = CURRENT_TIMESTAMP WHERE id = ?', [user.id]);
+
+  if (user.two_factor_enabled) {
+    return res.json({
+      require2fa: true,
+      userId: user.id
+    });
+  }
+
+  // Generate Session ID for multi-session enforcement
+  const sessionId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+  
+  if (settings.security_multi_session_enabled === 'false') {
+    // Invalidate other sessions
+    execute('DELETE FROM user_sessions WHERE user_id = ?', [user.id]);
+  }
+  
+  // Store session
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  execute('INSERT INTO user_sessions (id, user_id, expires_at) VALUES (?, ?, ?)', [sessionId, user.id, expiresAt]);
 
   const token = signToken({
     id: user.id,
@@ -62,8 +142,9 @@ apiRouter.post('/auth/login', async (req: Request, res: Response) => {
     role: user.role,
     role_id: user.role_id,
     avatar: user.avatar,
-    bio: user.bio
-  });
+    bio: user.bio,
+    sessionId // We need to update signToken or just include it in the object
+  } as any);
 
   res.json({
     token,
@@ -85,8 +166,10 @@ apiRouter.post('/auth/register', async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'جميع الحقول مطلوبة' });
   }
 
-  if (password.length < 6) {
-    return res.status(400).json({ error: 'كلمة المرور يجب أن لا تقل عن 6 أحرف' });
+  const settings = await getSiteSettings();
+  const passwordError = validatePassword(password, settings);
+  if (passwordError) {
+    return res.status(400).json({ error: passwordError });
   }
 
   const normalizedEmail = email.trim().toLowerCase();
@@ -135,8 +218,10 @@ apiRouter.put('/auth/profile', requireAuth, async (req: AuthenticatedRequest, re
   const userId = req.user!.id;
 
   if (password) {
-    if (password.length < 6) {
-      return res.status(400).json({ error: 'كلمة المرور يجب أن تكون 6 أحرف على الأقل' });
+    const settings = await getSiteSettings();
+    const passwordError = validatePassword(password, settings);
+    if (passwordError) {
+      return res.status(400).json({ error: passwordError });
     }
     const hash = await bcrypt.hash(password, 10);
     execute('UPDATE users SET password_hash = ? WHERE id = ?', [hash, userId]);
@@ -154,7 +239,106 @@ apiRouter.put('/auth/profile', requireAuth, async (req: AuthenticatedRequest, re
   res.json({ user: updated });
 });
 
+// ==========================================
+// 1.1 TWO-FACTOR AUTHENTICATION (2FA)
+// ==========================================
+
+apiRouter.post('/auth/2fa/setup', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const user = queryOne('SELECT * FROM users WHERE id = ?', [req.user!.id]);
+  if (!user) return res.status(404).json({ error: 'المستخدم غير موجود' });
+
+  if (user.two_factor_enabled) {
+    return res.status(400).json({ error: 'المصادقة الثنائية مفعلة بالفعل' });
+  }
+
+  const secret = authenticator.generateSecret();
+  const otpauth = authenticator.keyuri(user.email, 'لسه في نور', secret);
+  const qrCodeUrl = await QRCode.toDataURL(otpauth);
+
+  // Store secret temporarily in session or update user (inactive state)
+  execute('UPDATE users SET two_factor_secret = ? WHERE id = ?', [secret, user.id]);
+
+  res.json({ secret, qrCodeUrl });
+});
+
+apiRouter.post('/auth/2fa/verify-setup', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+  const { token } = req.body;
+  const user = queryOne('SELECT * FROM users WHERE id = ?', [req.user!.id]);
+  
+  if (!user || !user.two_factor_secret) {
+    return res.status(400).json({ error: 'لم يتم العثور على سر المصادقة' });
+  }
+
+  const isValid = authenticator.check(token, user.two_factor_secret);
+  if (!isValid) {
+    return res.status(400).json({ error: 'رمز التحقق غير صحيح' });
+  }
+
+  execute('UPDATE users SET two_factor_enabled = 1 WHERE id = ?', [user.id]);
+  res.json({ success: true });
+});
+
+apiRouter.post('/auth/2fa/verify-login', async (req: Request, res: Response) => {
+  const { userId, token } = req.body;
+  const user = queryOne('SELECT * FROM users WHERE id = ?', [userId]);
+
+  if (!user || !user.two_factor_enabled || !user.two_factor_secret) {
+    return res.status(400).json({ error: 'طلب غير صالح' });
+  }
+
+  const isValid = authenticator.check(token, user.two_factor_secret);
+  if (!isValid) {
+    return res.status(400).json({ error: 'رمز التحقق غير صحيح' });
+  }
+
+  const settings = await getSiteSettings();
+  
+  // Generate Session ID for multi-session enforcement
+  const sessionId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+  
+  if (settings.security_multi_session_enabled === 'false') {
+    // Invalidate other sessions
+    execute('DELETE FROM user_sessions WHERE user_id = ?', [user.id]);
+  }
+  
+  // Store session
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  execute('INSERT INTO user_sessions (id, user_id, expires_at) VALUES (?, ?, ?)', [sessionId, user.id, expiresAt]);
+
+  const authToken = signToken({
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    role_id: user.role_id,
+    avatar: user.avatar,
+    bio: user.bio,
+    sessionId
+  } as any);
+
+  res.json({
+    token: authToken,
+    user: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      role_id: user.role_id,
+      avatar: user.avatar,
+      bio: user.bio
+    }
+  });
+});
+
+apiRouter.post('/auth/2fa/disable', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+  execute('UPDATE users SET two_factor_enabled = 0, two_factor_secret = NULL WHERE id = ?', [req.user!.id]);
+  res.json({ success: true });
+});
+
 apiRouter.post('/auth/logout', requireAuth, (req: AuthenticatedRequest, res: Response) => {
+  if (req.user?.sessionId) {
+    execute('DELETE FROM user_sessions WHERE id = ?', [req.user.sessionId]);
+  }
   logAudit(req.user, 'logout', 'user', req.user?.id.toString(), { message: 'User logged out' });
   res.json({ success: true });
 });
@@ -1529,6 +1713,101 @@ apiRouter.get('/admin/roles', requirePermission('admins.view'), (_req: Authentic
     (role as any).permissions = perms.map(p => p.name);
   }
   res.json({ roles });
+});
+
+apiRouter.post('/admin/roles', requirePermission('admins.edit'), (req: AuthenticatedRequest, res: Response) => {
+  const { name, description, permissions } = req.body;
+  
+  if (!name) return res.status(400).json({ error: 'اسم الصلاحية مطلوب' });
+
+  try {
+    const { lastInsertRowid: roleId } = execute(
+      'INSERT INTO roles (name, description) VALUES (?, ?)',
+      [name, description]
+    );
+
+    if (permissions && Array.isArray(permissions)) {
+      for (const permName of permissions) {
+        const perm = queryOne('SELECT id FROM permissions WHERE name = ?', [permName]);
+        if (perm) {
+          execute('INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)', [roleId, perm.id]);
+        }
+      }
+    }
+
+    logAudit(req.user, 'create', 'role', roleId.toString(), { name, permissions });
+    res.json({ success: true, id: roleId });
+  } catch (err: any) {
+    res.status(500).json({ error: 'فشل إنشاء الصلاحية: ' + err.message });
+  }
+});
+
+apiRouter.put('/admin/roles/:id', requirePermission('admins.edit'), (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const { name, description, permissions } = req.body;
+
+  if (!name) return res.status(400).json({ error: 'اسم الصلاحية مطلوب' });
+
+  try {
+    execute(
+      'UPDATE roles SET name = ?, description = ? WHERE id = ?',
+      [name, description, id]
+    );
+
+    // Update permissions: clear and re-insert
+    execute('DELETE FROM role_permissions WHERE role_id = ?', [id]);
+    
+    if (permissions && Array.isArray(permissions)) {
+      for (const permName of permissions) {
+        const perm = queryOne('SELECT id FROM permissions WHERE name = ?', [permName]);
+        if (perm) {
+          execute('INSERT INTO role_permissions (role_id, permission_id) VALUES (?, ?)', [id, perm.id]);
+        }
+      }
+    }
+
+    logAudit(req.user, 'update', 'role', id, { name, permissions });
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: 'فشل تحديث الصلاحية: ' + err.message });
+  }
+});
+
+apiRouter.delete('/admin/roles/:id', requirePermission('admins.delete'), (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  
+  // Don't allow deleting protected roles
+  if (['1', '2', '3'].includes(id)) {
+    return res.status(400).json({ error: 'لا يمكن حذف الرتب الأساسية للنظام' });
+  }
+
+  try {
+    execute('DELETE FROM roles WHERE id = ?', [id]);
+    logAudit(req.user, 'delete', 'role', id);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: 'فشل حذف الصلاحية: ' + err.message });
+  }
+});
+
+apiRouter.put('/admin/users/:id/role', requirePermission('admins.edit'), (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const { roleId } = req.body;
+
+  try {
+    const role = roleId ? queryOne('SELECT name FROM roles WHERE id = ?', [roleId]) : null;
+    const roleName = role ? (role.name === 'Super Admin' ? 'SUPER_ADMIN' : role.name === 'Admin' ? 'ADMIN' : role.name === 'Editor' ? 'EDITOR' : 'USER') : 'USER';
+
+    execute(
+      'UPDATE users SET role_id = ?, role = ? WHERE id = ?',
+      [roleId, roleName, id]
+    );
+
+    logAudit(req.user, 'update_user_role', 'user', id, { roleId, roleName });
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: 'فشل تحديث رتبة المستخدم: ' + err.message });
+  }
 });
 
 apiRouter.get('/admin/permissions', requirePermission('admins.view'), (_req: AuthenticatedRequest, res: Response) => {

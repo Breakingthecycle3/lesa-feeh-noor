@@ -32,6 +32,32 @@ export async function getDb(): Promise<Database> {
   dbInstance.run('PRAGMA foreign_keys = ON;');
 
   initSchema(dbInstance);
+  
+  // Migration: Add security columns to users table if they don't exist
+  try {
+    const tableInfo = dbInstance.exec("PRAGMA table_info(users)");
+    if (tableInfo.length > 0) {
+      const columns = tableInfo[0].values.map(v => v[1] as string);
+      if (!columns.includes('failed_login_attempts')) {
+        dbInstance.run("ALTER TABLE users ADD COLUMN failed_login_attempts INTEGER DEFAULT 0");
+      }
+      if (!columns.includes('locked_until')) {
+        dbInstance.run("ALTER TABLE users ADD COLUMN locked_until DATETIME");
+      }
+      if (!columns.includes('last_login')) {
+        dbInstance.run("ALTER TABLE users ADD COLUMN last_login DATETIME");
+      }
+      if (!columns.includes('two_factor_enabled')) {
+        dbInstance.run("ALTER TABLE users ADD COLUMN two_factor_enabled INTEGER DEFAULT 0");
+      }
+      if (!columns.includes('two_factor_secret')) {
+        dbInstance.run("ALTER TABLE users ADD COLUMN two_factor_secret TEXT");
+      }
+    }
+  } catch (err) {
+    console.error('Migration failed:', err);
+  }
+
   await seedInitialData(dbInstance);
   await ensureFatmaAdmin(dbInstance);
   saveDb();
@@ -97,6 +123,10 @@ function initSchema(db: Database) {
       avatar TEXT,
       bio TEXT,
       status TEXT NOT NULL DEFAULT 'active', -- 'active', 'suspended'
+      failed_login_attempts INTEGER DEFAULT 0,
+      locked_until DATETIME,
+      two_factor_enabled INTEGER DEFAULT 0,
+      two_factor_secret TEXT,
       last_login DATETIME,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP

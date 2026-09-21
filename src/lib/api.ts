@@ -410,6 +410,23 @@ export const api = {
     // Roles & Permissions
     getRoles: () => request<{ roles: any[] }>('/api/admin/roles'),
     getPermissions: () => request<{ permissions: any[] }>('/api/admin/permissions'),
+    createRole: (data: { name: string; description: string; permissions: string[] }) =>
+      request<{ success: boolean; id: number }>('/api/admin/roles', {
+        method: 'POST',
+        body: JSON.stringify(data)
+      }),
+    updateRole: (id: number, data: { name: string; description: string; permissions: string[] }) =>
+      request<{ success: boolean }>(`/api/admin/roles/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(data)
+      }),
+    deleteRole: (id: number) =>
+      request<{ success: boolean }>(`/api/admin/roles/${id}`, { method: 'DELETE' }),
+    updateUserRole: (userId: number, roleId: number | null) =>
+      request<{ success: boolean }>(`/api/admin/users/${userId}/role`, {
+        method: 'PUT',
+        body: JSON.stringify({ roleId })
+      }),
 
     // Users
     getUsers: () => request<{ users: User[] }>('/api/admin/users'),
@@ -431,6 +448,20 @@ export const api = {
       request<{ success: boolean; message: string }>('/api/admin/settings', {
         method: 'PUT',
         body: JSON.stringify(settings)
-      })
+      }),
+
+    // 2FA
+    setup2FA: () => request<{ secret: string; qrCodeUrl: string }>('/api/auth/2fa/setup', { method: 'POST' }),
+    verify2FASetup: (token: string) =>
+      request<{ success: boolean }>('/api/auth/2fa/verify-setup', {
+        method: 'POST',
+        body: JSON.stringify({ token })
+      }),
+    verify2FALogin: (userId: number, token: string) =>
+      request<{ token: string; user: User }>('/api/auth/2fa/verify-login', {
+        method: 'POST',
+        body: JSON.stringify({ userId, token })
+      }),
+    disable2FA: () => request<{ success: boolean }>('/api/auth/2fa/disable', { method: 'POST' })
   }
 };

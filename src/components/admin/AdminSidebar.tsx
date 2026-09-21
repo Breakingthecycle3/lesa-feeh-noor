@@ -39,6 +39,7 @@ export type AdminTab =
   | 'newsletter'
   | 'users'
   | 'roles'
+  | 'security'
   | 'audit_logs'
   | 'settings';
 
@@ -83,6 +84,7 @@ const SIDEBAR_SECTIONS: { title: string; items: SidebarItem[] }[] = [
     items: [
       { id: 'users', label: 'إدارة الأعضاء', icon: Users, permission: 'users.view' },
       { id: 'roles', label: 'الأدوار والصلاحيات', icon: ShieldCheck, permission: 'admins.view' },
+      { id: 'security', label: 'الأمان والحماية', icon: ShieldCheck, permission: 'settings.view' },
       { id: 'audit_logs', label: 'سجل العمليات', icon: History, permission: 'audit_logs.view' },
       { id: 'settings', label: 'إعدادات المنصة', icon: Settings, permission: 'settings.view' },
     ]

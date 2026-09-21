@@ -22,6 +22,9 @@ interface AuthContextType {
   isLogoutModalOpen: boolean;
   openLogoutModal: () => void;
   closeLogoutModal: () => void;
+  requires2FA: boolean;
+  twoFactorUserId: number | null;
+  verify2FA: (token: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -32,6 +35,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
   const [authModalTab, setAuthModalTab] = useState<'login' | 'register'>('login');
+  const [requires2FA, setRequires2FA] = useState(false);
+  const [twoFactorUserId, setTwoFactorUserId] = useState<number | null>(null);
   const { showToast } = useToast();
 
   useEffect(() => {
@@ -57,11 +62,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async (email: string, password: string) => {
     localStorage.removeItem('lesanour_logged_out');
-    const res = await api.login({ email, password });
+    const res = await api.login({ email, password }) as any;
+    
+    if (res.require2fa) {
+      setRequires2FA(true);
+      setTwoFactorUserId(res.userId);
+      return;
+    }
+
     localStorage.setItem('lesanour_token', res.token);
     setUser(res.user);
     setIsAuthModalOpen(false);
     showToast(`مرحباً بك مجدداً يا ${res.user.name} 🤍`, 'success');
+  };
+
+  const verify2FA = async (token: string) => {
+    if (!twoFactorUserId) return;
+    try {
+      const res = await api.admin.verify2FALogin(twoFactorUserId, token);
+      localStorage.setItem('lesanour_token', res.token);
+      setUser(res.user);
+      setRequires2FA(false);
+      setTwoFactorUserId(null);
+      setIsAuthModalOpen(false);
+      showToast(`تم التحقق بنجاح. مرحباً بك مجدداً يا ${res.user.name} 🤍`, 'success');
+    } catch (err: any) {
+      throw err;
+    }
   };
 
   const register = async (name: string, email: string, password: string) => {
@@ -96,6 +123,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const closeAuthModal = () => {
     setIsAuthModalOpen(false);
+    setRequires2FA(false);
+    setTwoFactorUserId(null);
   };
 
   const openLogoutModal = () => {
@@ -136,7 +165,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         closeAuthModal,
         isLogoutModalOpen,
         openLogoutModal,
-        closeLogoutModal
+        closeLogoutModal,
+        requires2FA,
+        twoFactorUserId,
+        verify2FA
       }}
     >
       {children}

@@ -9,6 +9,7 @@ export interface User {
   bio?: string;
   status?: 'active' | 'suspended';
   last_login?: string;
+  two_factor_enabled?: number;
   created_at?: string;
 }
 

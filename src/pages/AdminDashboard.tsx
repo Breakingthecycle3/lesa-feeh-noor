@@ -78,6 +78,7 @@ import { AdminMessagesTab } from '../components/admin/AdminMessagesTab';
 import { AdminSidebar, AdminTab } from '../components/admin/AdminSidebar';
 import { AdminAuditLogs } from '../components/admin/AdminAuditLogs';
 import { AdminRolesTab } from '../components/admin/AdminRolesTab';
+import { AdminSecurityTab } from '../components/admin/AdminSecurityTab';
 
 // Using AdminTab type from AdminSidebar
 
@@ -962,15 +963,12 @@ export function AdminDashboard({ onNavigate }: { onNavigate: (path: string) => v
                   />
                 )}
 
-                {activeTab === 'roles' && isSuperAdmin && (
-                  <AdminRolesTab
-                    roles={roles}
-                    permissions={permissions}
-                    onReload={() => {
-                      loadRoles();
-                      loadPermissions();
-                    }}
-                  />
+                {activeTab === 'roles' && hasPermission('admins.view') && (
+                  <AdminRolesTab />
+                )}
+
+                {activeTab === 'security' && (
+                  <AdminSecurityTab />
                 )}
 
                 {activeTab === 'users' && hasPermission('users.view') && (
